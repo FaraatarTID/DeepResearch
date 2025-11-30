@@ -3,14 +3,6 @@ import asyncio
 import os
 from pathlib import Path
 
-# Load secrets into env for compatibility with config.py
-if "GEMINI_KEY" in st.secrets:
-    os.environ["GEMINI_KEY"] = st.secrets["GEMINI_KEY"]
-if "BRAVE_API_KEY" in st.secrets:
-    os.environ["BRAVE_API_KEY"] = st.secrets["BRAVE_API_KEY"]
-if "UNPAYWALL_EMAIL" in st.secrets:
-    os.environ["UNPAYWALL_EMAIL"] = st.secrets["UNPAYWALL_EMAIL"]
-
 from deep_research.core import generate_keywords, filter_snippets, save_bibliometrics, synthesise
 from deep_research.search import search_all
 from deep_research.utils import build_doc, safe_save

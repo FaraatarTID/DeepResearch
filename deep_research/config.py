@@ -2,13 +2,33 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
-# Load environment variables from .env file
+# Try to import streamlit for secrets support
+try:
+    import streamlit as st
+    _has_streamlit = True
+except ImportError:
+    _has_streamlit = False
+
+# Load environment variables from .env file (fallback)
 load_dotenv()
 
-# API Keys
-GEMINI_KEY = os.getenv("GEMINI_KEY")
-BRAVE_API_KEY = os.getenv("BRAVE_API_KEY")
-UNPAYWALL_EMAIL = os.getenv("UNPAYWALL_EMAIL")
+def _get_secret(key, default=None):
+    """Get secret from Streamlit secrets or environment variables."""
+    # First, try Streamlit secrets (if available)
+    if _has_streamlit:
+        try:
+            if key in st.secrets:
+                return st.secrets[key]
+        except (FileNotFoundError, KeyError):
+            pass
+    
+    # Fallback to environment variables
+    return os.getenv(key, default)
+
+# API Keys - prioritize Streamlit secrets, fallback to .env
+GEMINI_KEY = _get_secret("GEMINI_KEY")
+BRAVE_API_KEY = _get_secret("BRAVE_API_KEY")
+UNPAYWALL_EMAIL = _get_secret("UNPAYWALL_EMAIL")
 
 # Configuration
 MAX_URLS_PER_SOURCE = int(os.getenv("MAX_URLS_PER_SOURCE", 500))
