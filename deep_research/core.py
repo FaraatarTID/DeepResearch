@@ -179,20 +179,15 @@ async def synthesise(snippets: List[Snippet], subject: str) -> str:
     * **Multi-Dimensional Angles:** Examine the subject from at least four distinct perspectives (e.g., Ethical, Financial, Regulatory, Systemic).
     * **Logical Flow:** Ensure a cohesive narrative where one section logically precipitates the next. Use clear headings and sub-headings to classify information effectively.
 
-    ### 3. Evidence and Citations (IEEE Standard)
-    * **Evidence-Based:** All claims must be supported by facts gathered from the context.
+    ### 3. Citations (IEEE Standard)
     * **Citation Format:** Use the IEEE standard for in-text citations (e.g., $[1]$, $[2]$).
     * **Reference List:** At the end of the report, provide a complete Reference List. **Crucially, you must include the specific URL for all web-based sources** to ensure verification.
-
-    ### 4. Output Goal
+    * **All claims must be strongly supported by facts gathered from the context.
+    * **Do NOT add sources outside the provided sources: {len(snippets)}.
+    
+     ### 4. Output Goal
     The final deliverable should be a "Original Analytical Report" that feels like a novel contribution to the subject, not just a summary of existing text. It must be deep, detail-oriented, and strictly follow the formatting rules above.
         
-    CRITICAL CITATION RULES:
-    - Cite ONLY by number: (1), (2), etc.
-    - Reference list must contain EXACTLY entries 1-{len(snippets)}
-    - Use IEEE Referencing format
-    - Do NOT add sources outside this list
-    
     Sources:
     {source_list}
     
