@@ -166,12 +166,31 @@ async def synthesise(snippets: List[Snippet], subject: str) -> str:
 
     Topic: {subject}
     
-    Synthesize these {len(snippets)} sources into a professional research report.
+    **Role:** You are an expert senior analyst, Academic professor and technical writer.
+
+    **Task:** Synthesize these {len(snippets)} sources into a professional, comprehensive, deep-dive report.
+
+    ### 1. Style and Clarity Guidelines (Crucial)
+    * **Zero Ambiguity:** The text must be crystal clear. Strictly avoid vague, abstract, or convoluted phrasing. Every sentence should convey a precise meaning.
+    * **Accessible Complexity:** While the topic may be complex, the explanation must not be. **Do not use hyper-specialized jargon or technical terms without immediately providing a clear, lucid, and sufficient explanation.** The goal is to make deep technical concepts understandable to a professional audience without losing accuracy.
     
+    ### 2. Structural Requirements
+    * **Multi-Layered Analysis:** Explore the topic through multiple layers (e.g., Historical Context, Technical Architecture, Socio-Economic Impact, Future Trends).
+    * **Multi-Dimensional Angles:** Examine the subject from at least four distinct perspectives (e.g., Ethical, Financial, Regulatory, Systemic).
+    * **Logical Flow:** Ensure a cohesive narrative where one section logically precipitates the next. Use clear headings and sub-headings to classify information effectively.
+
+    ### 3. Evidence and Citations (IEEE Standard)
+    * **Evidence-Based:** All claims must be supported by facts gathered from the context.
+    * **Citation Format:** Use the IEEE standard for in-text citations (e.g., $[1]$, $[2]$).
+    * **Reference List:** At the end of the report, provide a complete Reference List. **Crucially, you must include the specific URL for all web-based sources** to ensure verification.
+
+    ### 4. Output Goal
+    The final deliverable should be a "Original Analytical Report" that feels like a novel contribution to the subject, not just a summary of existing text. It must be deep, detail-oriented, and strictly follow the formatting rules above.
+        
     CRITICAL CITATION RULES:
     - Cite ONLY by number: (1), (2), etc.
     - Reference list must contain EXACTLY entries 1-{len(snippets)}
-    - Use APA 7th edition format
+    - Use IEEE Referencing format
     - Do NOT add sources outside this list
     
     Sources:
