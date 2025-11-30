@@ -180,8 +180,6 @@ async def synthesise(snippets: List[Snippet], subject: str) -> str:
     * **Logical Flow:** Ensure a cohesive narrative where one section logically precipitates the next. Use clear headings and sub-headings to classify information effectively.
 
     ### 3. Citations (IEEE Standard)
-    * **Citation Format:** Use the IEEE standard for in-text citations (e.g., $[1]$, $[2]$).
-    * **Reference List:** At the end of the report, provide a complete Reference List. **Crucially, you must include the specific URL for all web-based sources** to ensure verification.
     * **All claims must be strongly supported by facts gathered from the context.
     * **Do NOT add sources outside the provided sources: {len(snippets)}.
     
