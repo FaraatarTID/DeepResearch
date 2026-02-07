@@ -87,11 +87,11 @@ See [DEPLOYMENT.md](DEPLOYMENT.md) for detailed instructions on deploying to Str
 You can adjust retry behavior and pacing via environment variables if you hit API rate limits:
 
 ```bash
-export BRAVE_MAX_RETRIES=5
-export BRAVE_CONCURRENCY=1
-export BRAVE_QUERY_DELAY_S=0.5
+export BRAVE_MAX_RETRIES=3
+export BRAVE_CONCURRENCY=2
+export BRAVE_QUERY_DELAY_S=0.2
 export SEMANTIC_MAX_RETRIES=5
-export SEMANTIC_QUERY_DELAY_S=0.5
+export SEMANTIC_QUERY_DELAY_S=0.4
 ```
 
 ## Project Structure
