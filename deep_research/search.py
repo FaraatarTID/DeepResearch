@@ -10,12 +10,10 @@ from .config import (
     MIN_CITATION_COUNT,
     MAX_URLS_PER_SOURCE,
     BRAVE_CONCURRENCY,
-    BRAVE_MAX_QUERIES,
     BRAVE_MAX_RETRIES,
     BRAVE_QUERY_DELAY_S,
     SEMANTIC_MAX_RETRIES,
     SEMANTIC_QUERY_DELAY_S,
-    SEMANTIC_MAX_QUERIES,
 )
 from .processing import Snippet, pdf_to_text, docx_to_text
 from .utils import logger, gemini_complete
@@ -299,15 +297,13 @@ async def search_all(keywords_dict: Dict[str, List[str]], subject: str = "") -> 
         tasks = []
         
         # Brave Search Tasks
-        general_queries = keywords_dict.get("general", [])[:BRAVE_MAX_QUERIES]
-        for q in general_queries:
+        for q in keywords_dict.get("general", []):
             tasks.append(brave_search(q, session, brave_semaphore, brave_throttle_lock, brave_throttle_state))
             
         # Semantic Scholar Tasks (serialize to reduce rate limiting pressure)
         brave_results = await asyncio.gather(*tasks)
         semantic_results = []
-        academic_queries = keywords_dict.get("academic", [])[:SEMANTIC_MAX_QUERIES]
-        for q in academic_queries:
+        for q in keywords_dict.get("academic", []):
             semantic_results.append(await semantic_search(q, session, semantic_semaphore, subject))
             if SEMANTIC_QUERY_DELAY_S > 0:
                 await asyncio.sleep(SEMANTIC_QUERY_DELAY_S)
