@@ -12,8 +12,11 @@ from .config import (
     BRAVE_CONCURRENCY,
     BRAVE_MAX_RETRIES,
     BRAVE_QUERY_DELAY_S,
+    BRAVE_MAX_DELAY_S,
     SEMANTIC_MAX_RETRIES,
     SEMANTIC_QUERY_DELAY_S,
+    SEMANTIC_MAX_DELAY_S,
+    SEMANTIC_SCHOLAR_API_KEY,
 )
 from .processing import Snippet, pdf_to_text, docx_to_text
 from .utils import logger, gemini_complete
@@ -91,12 +94,23 @@ async def brave_search(
     for attempt in range(max_retries + 1):
         try:
             async with semaphore:
-                await _throttle_request(throttle_lock, BRAVE_QUERY_DELAY_S, throttle_state)
+                current_delay = max(0.0, throttle_state.get("delay_s", BRAVE_QUERY_DELAY_S))
+                await _throttle_request(throttle_lock, current_delay, throttle_state)
                 async with session.get(url, headers=headers, params=params) as resp:
                     if resp.status == 429:
                         if attempt < max_retries:
                             retry_after = _retry_after_seconds(resp.headers)
                             wait_time = retry_after or (backoff * (2 ** attempt) + random.uniform(0, 0.5))
+                            if retry_after:
+                                throttle_state["delay_s"] = min(
+                                    max(current_delay, retry_after),
+                                    BRAVE_MAX_DELAY_S,
+                                )
+                            else:
+                                throttle_state["delay_s"] = min(
+                                    max(current_delay * 2, BRAVE_QUERY_DELAY_S),
+                                    BRAVE_MAX_DELAY_S,
+                                )
                             logger.warning(f"Brave API rate limit (429). Retrying in {wait_time}s...")
                             await asyncio.sleep(wait_time)
                             continue
@@ -170,12 +184,20 @@ async def semantic_search(
     query: str,
     session: aiohttp.ClientSession,
     semaphore: asyncio.Semaphore,
+    throttle_lock: asyncio.Lock,
+    throttle_state: Dict[str, float],
     subject: str,
     limit: int = 20,
 ) -> List[Snippet]:
     """Search using Semantic Scholar API."""
     limit = min(limit, MAX_URLS_PER_SOURCE)
     url = "https://api.semanticscholar.org/graph/v1/paper/search"
+    headers = {
+        "Accept": "application/json",
+        "User-Agent": USER_AGENT,
+    }
+    if SEMANTIC_SCHOLAR_API_KEY:
+        headers["x-api-key"] = SEMANTIC_SCHOLAR_API_KEY
     params = {
         "query": query,
         "limit": limit,
@@ -190,11 +212,23 @@ async def semantic_search(
     for attempt in range(max_retries + 1):
         try:
             async with semaphore:
-                async with session.get(url, params=params) as resp:
+                current_delay = max(0.0, throttle_state.get("delay_s", SEMANTIC_QUERY_DELAY_S))
+                await _throttle_request(throttle_lock, current_delay, throttle_state)
+                async with session.get(url, params=params, headers=headers) as resp:
                     if resp.status == 429:
                         if attempt < max_retries:
                             retry_after = _retry_after_seconds(resp.headers)
-                            wait_time = retry_after or (backoff * (2 ** attempt) + random.uniform(0, 0.75))
+                            wait_time = retry_after or (backoff * (2 ** attempt) + random.uniform(0.5, 1.5))
+                            if retry_after:
+                                throttle_state["delay_s"] = min(
+                                    max(current_delay, retry_after),
+                                    SEMANTIC_MAX_DELAY_S,
+                                )
+                            else:
+                                throttle_state["delay_s"] = min(
+                                    max(current_delay * 2, SEMANTIC_QUERY_DELAY_S),
+                                    SEMANTIC_MAX_DELAY_S,
+                                )
                             logger.warning(f"Semantic Scholar rate limit (429). Retrying in {wait_time}s...")
                             await asyncio.sleep(wait_time)
                             continue
@@ -291,7 +325,9 @@ async def search_all(keywords_dict: Dict[str, List[str]], subject: str = "") -> 
     brave_semaphore = asyncio.Semaphore(BRAVE_CONCURRENCY)
     semantic_semaphore = asyncio.Semaphore(1) # Limit Semantic Scholar to 1 concurrent request
     brave_throttle_lock = asyncio.Lock()
-    brave_throttle_state = {"last_request": 0.0}
+    brave_throttle_state = {"last_request": 0.0, "delay_s": BRAVE_QUERY_DELAY_S}
+    semantic_throttle_lock = asyncio.Lock()
+    semantic_throttle_state = {"last_request": 0.0, "delay_s": SEMANTIC_QUERY_DELAY_S}
     
     async with aiohttp.ClientSession() as session:
         tasks = []
@@ -304,9 +340,16 @@ async def search_all(keywords_dict: Dict[str, List[str]], subject: str = "") -> 
         brave_results = await asyncio.gather(*tasks)
         semantic_results = []
         for q in keywords_dict.get("academic", []):
-            semantic_results.append(await semantic_search(q, session, semantic_semaphore, subject))
-            if SEMANTIC_QUERY_DELAY_S > 0:
-                await asyncio.sleep(SEMANTIC_QUERY_DELAY_S)
+            semantic_results.append(
+                await semantic_search(
+                    q,
+                    session,
+                    semantic_semaphore,
+                    semantic_throttle_lock,
+                    semantic_throttle_state,
+                    subject,
+                )
+            )
         
         for res in brave_results:
             all_snippets.extend(res)

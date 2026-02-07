@@ -4,17 +4,15 @@ from unittest.mock import MagicMock, patch
 from deep_research.search import semantic_search
 
 class TestSemanticRetry(unittest.TestCase):
-    @patch('aiohttp.ClientSession')
     @patch('deep_research.search.check_relevance')
     @patch('deep_research.search.fetch_text')
     @patch('asyncio.sleep')
-    def test_semantic_search_retry(self, mock_sleep, mock_fetch_text, mock_check_relevance, mock_session_cls):
+    def test_semantic_search_retry(self, mock_sleep, mock_fetch_text, mock_check_relevance):
         mock_check_relevance.return_value = True
         mock_fetch_text.return_value = "Content"
         async def run_test():
             # Setup mock response
             mock_session = MagicMock()
-            mock_session_cls.return_value.__aenter__.return_value = mock_session
             
             # Mock responses: 429, 429, 200 (Success)
             mock_resp_429 = MagicMock()
@@ -47,7 +45,17 @@ class TestSemanticRetry(unittest.TestCase):
             
             # Run the function
             semaphore = asyncio.Semaphore(1)
-            results = await semantic_search("test query", semaphore, subject="test subject", limit=1)
+            throttle_lock = asyncio.Lock()
+            throttle_state = {"last_request": 0.0, "delay_s": 0.0}
+            results = await semantic_search(
+                "test query",
+                mock_session,
+                semaphore,
+                throttle_lock,
+                throttle_state,
+                subject="test subject",
+                limit=1,
+            )
             
             # Verify results
             self.assertEqual(len(results), 1)
