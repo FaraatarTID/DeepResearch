@@ -7,6 +7,7 @@ from .config import (
     USER_AGENT,
     CONCURRENCY,
     MIN_CITATION_COUNT,
+    MAX_URLS_PER_SOURCE,
     BRAVE_MAX_RETRIES,
     SEMANTIC_MAX_RETRIES,
     SEMANTIC_QUERY_DELAY_S,
@@ -152,6 +153,7 @@ async def semantic_search(
     limit: int = 20,
 ) -> List[Snippet]:
     """Search using Semantic Scholar API."""
+    limit = min(limit, MAX_URLS_PER_SOURCE)
     url = "https://api.semanticscholar.org/graph/v1/paper/search"
     params = {
         "query": query,
