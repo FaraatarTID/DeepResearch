@@ -10,11 +10,21 @@ import logging
 
 # Setup logging to Streamlit
 class StreamlitHandler(logging.Handler):
-    def __init__(self, container):
+    def __init__(self, container, max_messages: int = 200):
         super().__init__()
         self.container = container
+        self.max_messages = max_messages
+        self._count = 0
+        self._truncated = False
 
     def emit(self, record):
+        if self._truncated:
+            return
+        self._count += 1
+        if self._count > self.max_messages:
+            self.container.code("Log output truncated to keep the UI responsive.", language=None)
+            self._truncated = True
+            return
         msg = self.format(record)
         self.container.code(msg, language=None)
 
@@ -108,6 +118,8 @@ if "biblio_text" not in st.session_state:
     st.session_state.biblio_text = None
 
 if start_btn and subject:
+    st.session_state.report = None
+    st.session_state.biblio_text = None
     status_container = st.status("Starting research...", expanded=True)
     
     # Apply nest_asyncio to allow nested event loops if needed

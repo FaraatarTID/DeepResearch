@@ -36,9 +36,14 @@ MAX_TOKENS_PER_URL = int(os.getenv("MAX_TOKENS_PER_URL", 2_000))
 MAX_SNIPPETS_TO_KEEP = int(os.getenv("MAX_SNIPPETS_TO_KEEP", 100))
 EST_CHAR_PER_TOKEN = 4
 CONCURRENCY = int(os.getenv("CONCURRENCY", 5))  # Increased default concurrency
+BRAVE_CONCURRENCY = int(os.getenv("BRAVE_CONCURRENCY", 2))
 JOURNAL_H_INDEX_THRESHOLD = int(os.getenv("JOURNAL_H_INDEX_THRESHOLD", 20))
 MIN_CITATION_COUNT = int(os.getenv("MIN_CITATION_COUNT", 3))  # Minimum citations for academic papers
 USER_AGENT = os.getenv("USER_AGENT", "Mozilla/5.0 (compatible; DeepResearchBot/1.0)")
+BRAVE_MAX_RETRIES = int(os.getenv("BRAVE_MAX_RETRIES", 3))
+BRAVE_QUERY_DELAY_S = float(os.getenv("BRAVE_QUERY_DELAY_S", 0.2))
+SEMANTIC_MAX_RETRIES = int(os.getenv("SEMANTIC_MAX_RETRIES", 5))
+SEMANTIC_QUERY_DELAY_S = float(os.getenv("SEMANTIC_QUERY_DELAY_S", 0.4))
 
 # Paths
 BASE_DIR = Path(__file__).parent.parent
