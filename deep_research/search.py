@@ -3,8 +3,7 @@ import aiohttp
 import urllib.parse
 from typing import List, Dict, Any
 from .config import BRAVE_API_KEY, MAX_URLS_PER_SOURCE, USER_AGENT, CONCURRENCY, MIN_CITATION_COUNT
-from .processing import Snippet, pdf_to_text, docx_to_text, is_quality_page, compress_text
-from .processing import Snippet, pdf_to_text, docx_to_text, is_quality_page, compress_text
+from .processing import Snippet, pdf_to_text, docx_to_text
 from .utils import logger, gemini_complete
 
 # Re-implement fetch_text and resolve_url locally if they were not in processing.py
@@ -185,8 +184,6 @@ async def semantic_search(query: str, semaphore: asyncio.Semaphore, subject: str
         try:
             # Filter by citation count
             citation_count = p.get("citationCount", 0)
-            if citation_count < MIN_CITATION_COUNT:
-                logger.debug(f"Filtered paper '{p.get('title', 'Unknown')}' - citations: {citation_count} < {MIN_CITATION_COUNT}")
             if citation_count < MIN_CITATION_COUNT:
                 logger.debug(f"Filtered paper '{p.get('title', 'Unknown')}' - citations: {citation_count} < {MIN_CITATION_COUNT}")
                 return None

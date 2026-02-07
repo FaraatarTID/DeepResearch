@@ -7,7 +7,6 @@ from typing import List, Dict
 from google import genai
 from .config import GEMINI_KEY, JOURNAL_H_INDEX_THRESHOLD, MAX_TOKENS_PER_URL, BIBLIO_FILE, MAX_SNIPPETS_TO_KEEP, MIN_CITATION_COUNT
 from .processing import Snippet, compress_text, is_quality_page, semantic_dedup
-from .processing import Snippet, compress_text, is_quality_page, semantic_dedup
 from .utils import logger, log_error, gemini_complete
 
 

@@ -3,10 +3,9 @@ import asyncio
 import os
 from pathlib import Path
 
-from deep_research.core import generate_keywords, filter_snippets, save_bibliometrics, synthesise
-from deep_research.search import search_all
-from deep_research.utils import build_doc, safe_save
-from deep_research.config import OUTPUT_FILE, BIBLIO_FILE, GEMINI_KEY, BRAVE_API_KEY
+from deep_research.pipeline import run_research
+from deep_research.utils import build_doc
+from deep_research.config import GEMINI_KEY, BRAVE_API_KEY
 import logging
 
 # Setup logging to Streamlit
@@ -124,41 +123,24 @@ if start_btn and subject:
     root_logger.addHandler(st_handler)
     root_logger.setLevel(logging.INFO)
 
-    async def run_research():
+    async def run_with_status():
         try:
-            # 1. Keywords
-            status_container.write("📝 Generating keywords...")
-            keywords = await generate_keywords(subject, general_rounds, academic_rounds)
-            status_container.write(f"✅ Keywords: {keywords}")
-            
-            # 2. Search
-            status_container.write("🔍 Searching sources...")
-            snippets = await search_all(keywords)
-            status_container.write(f"📊 Found {len(snippets)} raw snippets")
-            
-            if not snippets:
-                status_container.error("No snippets found.")
+            def status_update(message: str) -> None:
+                status_container.write(message)
+
+            result = await run_research(
+                subject=subject,
+                general_rounds=general_rounds,
+                academic_rounds=academic_rounds,
+                status_callback=status_update,
+            )
+
+            if result.error:
+                status_container.error(result.error)
                 return None, None
-            
-            # 3. Filter
-            status_container.write("🔄 Filtering and deduplicating...")
-            snippets = await filter_snippets(snippets)
-            status_container.write(f"✅ Kept {len(snippets)} quality snippets")
-            
-            if not snippets:
-                status_container.error("No quality snippets left.")
-                return None, None
-            
-            # 4. Bibliometrics
-            status_container.write("📊 Generating bibliometrics...")
-            biblio_text = save_bibliometrics(snippets)
-            
-            # 5. Synthesis
-            status_container.write("🧠 Synthesizing report...")
-            report = await synthesise(snippets, subject)
-            
+
             status_container.update(label="Research Complete!", state="complete", expanded=False)
-            return report, biblio_text
+            return result.report, result.biblio_text
             
         except Exception as e:
             import traceback
@@ -169,7 +151,7 @@ if start_btn and subject:
 
     # Run async loop
     try:
-        report, biblio_text = asyncio.run(run_research())
+        report, biblio_text = asyncio.run(run_with_status())
         st.session_state.report = report
         st.session_state.biblio_text = biblio_text
     except Exception as e:

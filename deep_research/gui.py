@@ -6,9 +6,8 @@ from tkinter import ttk, scrolledtext, messagebox
 from pathlib import Path
 import os
 
-from .config import GEMINI_KEY, BRAVE_API_KEY, UNPAYWALL_EMAIL, JOURNAL_H_INDEX_THRESHOLD, OUTPUT_FILE
-from .core import generate_keywords, filter_snippets, save_bibliometrics, synthesise
-from .search import search_all
+from .config import OUTPUT_FILE
+from .pipeline import run_research
 from .utils import build_doc, safe_save, logger
 
 import queue
@@ -148,49 +147,27 @@ class ResearchGUI:
         logger.info(f"Starting research on: {subject}")
         
         if self.stop_event.is_set(): return
-        
-        # 1. Keywords
-        logger.info("Generating keywords...")
-        keywords = await generate_keywords(subject, self.general_var.get(), self.academic_var.get())
-        logger.info(f"Keywords: {keywords}")
-        
-        if self.stop_event.is_set(): return
 
-        # 2. Search
-        logger.info("Searching sources...")
-        snippets = await search_all(keywords)
-        logger.info(f"Found {len(snippets)} raw snippets")
-        
-        if not snippets:
-            logger.error("No snippets found.")
-            return
-            
-        if self.stop_event.is_set(): return
+        def log_status(message: str) -> None:
+            logger.info(message)
 
-        # 3. Filter
-        logger.info("Filtering snippets...")
-        snippets = await filter_snippets(snippets)
-        logger.info(f"Kept {len(snippets)} quality snippets")
-        
-        if not snippets:
-            logger.error("No quality snippets left.")
+        result = await run_research(
+            subject=subject,
+            general_rounds=self.general_var.get(),
+            academic_rounds=self.academic_var.get(),
+            status_callback=log_status,
+        )
+
+        if result.error:
+            logger.error(result.error)
             return
 
-        if self.stop_event.is_set(): return
-
-        # 4. Bibliometrics
-        save_bibliometrics(snippets)
-        
-        # 5. Synthesis
-        logger.info("Synthesizing report...")
-        report = await synthesise(snippets, subject)
-        
-        doc = build_doc(report)
+        doc = build_doc(result.report or "")
         safe_save(doc, OUTPUT_FILE)
         
         # Also save as markdown
         md_path = OUTPUT_FILE.with_suffix(".md")
-        md_path.write_text(report, encoding="utf-8")
+        md_path.write_text(result.report or "", encoding="utf-8")
         logger.info(f"✅ Saved Markdown report to {md_path}")
         
         logger.info("Research Complete!")
