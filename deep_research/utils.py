@@ -7,7 +7,8 @@ from docx import Document
 from docx.shared import Pt
 from google import genai
 import asyncio
-from .config import GEMINI_KEY
+import re
+from .config import GEMINI_KEY, GEMINI_MODEL, GEMINI_MAX_DELAY_S
 
 # Configure logging
 logging.basicConfig(
@@ -129,7 +130,7 @@ async def gemini_complete(prompt: str, max_tokens: int = 6000) -> str:
         try:
             client = get_client()
             response = client.models.generate_content(
-                model="gemini-flash-latest",
+                model=GEMINI_MODEL,
                 contents=prompt,
                 config=genai.types.GenerateContentConfig(
                     max_output_tokens=max_tokens,
@@ -141,7 +142,13 @@ async def gemini_complete(prompt: str, max_tokens: int = 6000) -> str:
             error_str = str(e)
             if "503" in error_str or "429" in error_str:
                 if attempt < max_retries:
-                    wait_time = backoff * (2 ** attempt)
+                    retry_match = re.search(r"retryDelay['\"]?:\s*['\"]?(\d+(?:\.\d+)?)s", error_str)
+                    if not retry_match:
+                        retry_match = re.search(r"retry in\s+(\d+(?:\.\d+)?)s", error_str, re.IGNORECASE)
+                    if retry_match:
+                        wait_time = min(float(retry_match.group(1)), GEMINI_MAX_DELAY_S)
+                    else:
+                        wait_time = min(backoff * (2 ** attempt), GEMINI_MAX_DELAY_S)
                     logger.warning(f"Gemini API error ({error_str}). Retrying in {wait_time}s...")
                     await asyncio.sleep(wait_time)
                     continue
