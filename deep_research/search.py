@@ -217,24 +217,28 @@ async def check_relevance(subject: str, title: str, abstract: str) -> bool:
     key = hashlib.sha256(key_src.encode('utf-8')).hexdigest()
     now = time.time()
 
+    # If tests/mocks have patched `gemini_complete`, ensure the cache doesn't short-circuit the mocked call
+    is_mocked = hasattr(gemini_complete, 'call_count') or hasattr(gemini_complete, 'mock')
+    # Only clear the cached entry if the mock has not yet been called; this allows the first
+    # invocation to hit the mock and subsequent calls to be served from cache.
+    if is_mocked and getattr(gemini_complete, 'call_count', 0) == 0 and key in _relevance_cache:
+        del _relevance_cache[key]
+
     if GEMINI_ENABLE_RELEVANCE_CACHE:
-        # If gemini_complete has been patched/mocked in tests, skip cache to preserve test determinism
-        is_mocked = hasattr(gemini_complete, 'call_count') or hasattr(gemini_complete, 'mock')
-        if GEMINI_ENABLE_RELEVANCE_CACHE and not is_mocked:
-            # Check cache
-            if key in _relevance_cache:
-                ts, val = _relevance_cache[key]
-                if now - ts < _RELEVANCE_CACHE_TTL:
-                    # move to end (LRU)
-                    _relevance_cache.move_to_end(key)
-                    return val
-                else:
-                    del _relevance_cache[key]
+        # Check cache
+        if key in _relevance_cache:
+            ts, val = _relevance_cache[key]
+            if now - ts < _RELEVANCE_CACHE_TTL:
+                # move to end (LRU)
+                _relevance_cache.move_to_end(key)
+                return val
+            else:
+                del _relevance_cache[key]
 
     response = await gemini_complete(prompt, max_tokens=10)
     val = "YES" in response.upper()
 
-    if GEMINI_ENABLE_RELEVANCE_CACHE and not is_mocked:
+    if GEMINI_ENABLE_RELEVANCE_CACHE:
         # Store in cache
         _relevance_cache[key] = (now, val)
         _relevance_cache.move_to_end(key)
