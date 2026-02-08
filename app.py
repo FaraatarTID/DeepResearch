@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 
 from deep_research.pipeline import run_research
-from deep_research.utils import build_doc
+from deep_research.utils import build_doc, logger
 from deep_research.config import GEMINI_KEY, BRAVE_API_KEY
 import logging
 
@@ -66,21 +66,19 @@ with st.sidebar:
     
     if new_gemini:
         os.environ["GEMINI_KEY"] = new_gemini
-        # Force reload of client
-        import sys
-        if 'deep_research.core' in sys.modules:
-            sys.modules['deep_research.core']._client = None
-        else:
-            from deep_research import core
-            core._client = None 
+        # Reset cached client via public helper instead of mutating module internals
+        try:
+            from deep_research import utils as dr_utils
+            dr_utils.reset_client()
+        except Exception as e:
+            logger.exception("Failed to reset Gemini client: %s", e)
         
     if new_brave:
-        import sys
-        if 'deep_research.config' in sys.modules:
-            sys.modules['deep_research.config'].BRAVE_API_KEY = new_brave
-        else:
-            from deep_research import config
-            config.BRAVE_API_KEY = new_brave
+        try:
+            from deep_research import config as dr_config
+            dr_config.BRAVE_API_KEY = new_brave
+        except Exception as e:
+            logger.exception("Failed to set Brave API key: %s", e)
 
     st.markdown("---")
     st.markdown("### About")
@@ -117,15 +115,11 @@ if "report" not in st.session_state:
 if "biblio_text" not in st.session_state:
     st.session_state.biblio_text = None
 
-if start_btn and subject:
+    if start_btn and subject:
     st.session_state.report = None
     st.session_state.biblio_text = None
     status_container = st.status("Starting research...", expanded=True)
     
-    # Apply nest_asyncio to allow nested event loops if needed
-    import nest_asyncio
-    nest_asyncio.apply()
-
     # Add log expander
     log_expander = st.expander("View Logs", expanded=False)
     
@@ -155,22 +149,39 @@ if start_btn and subject:
             return result.report, result.biblio_text
             
         except Exception as e:
+            logger.exception("Error during run_with_status: %s", e)
             import traceback
             err_msg = f"Error: {str(e)}\n{traceback.format_exc()}"
             status_container.error(err_msg)
             st.error(err_msg) # Also show outside status container
             return None, None
 
-    # Run async loop
+    # Run the coroutine on a dedicated event loop to avoid using asyncio.run in library code
+    loop = asyncio.new_event_loop()
     try:
-        report, biblio_text = asyncio.run(run_with_status())
-        st.session_state.report = report
-        st.session_state.biblio_text = biblio_text
-    except Exception as e:
-        st.error(f"Critical Error in Event Loop: {e}")
-        st.session_state.report = None
-        st.session_state.biblio_text = None
+        asyncio.set_event_loop(loop)
+        try:
+            report, biblio_text = loop.run_until_complete(run_with_status())
+            st.session_state.report = report
+            st.session_state.biblio_text = biblio_text
+        except Exception as e:
+            logger.exception("Critical Error running event loop: %s", e)
+            st.error(f"Critical Error in Event Loop: {e}")
+            st.session_state.report = None
+            st.session_state.biblio_text = None
     finally:
+        try:
+            loop.run_until_complete(loop.shutdown_asyncgens())
+        except Exception:
+            pass
+        try:
+            asyncio.set_event_loop(None)
+        except Exception:
+            pass
+        try:
+            loop.close()
+        except Exception:
+            pass
         # Cleanup logger
         if 'st_handler' in locals():
             root_logger.removeHandler(st_handler)

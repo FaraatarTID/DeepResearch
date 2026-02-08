@@ -3,6 +3,7 @@ import aiohttp
 import random
 import time
 from typing import List, Dict, Optional
+from .utils import ExternalServiceError
 from .config import (
     BRAVE_API_KEY,
     USER_AGENT,
@@ -64,8 +65,10 @@ async def fetch_text(session: aiohttp.ClientSession, url: str, max_retries: int 
                     # Assume HTML/Text
                     return data.decode("utf-8", errors="ignore")
         except Exception as e:
+            logger.exception("Fetch attempt failed for %s: %s", url, e)
             if attempt == max_retries:
-                logger.debug(f"Failed to fetch {url}: {e}")
+                # Raise structured error so callers can decide how to handle
+                raise ExternalServiceError("fetch", f"{url} - {e}") from e
             await asyncio.sleep(1)
             
     return ""
@@ -76,6 +79,8 @@ async def brave_search(
     semaphore: asyncio.Semaphore,
     throttle_lock: asyncio.Lock,
     throttle_state: Dict[str, float],
+    cancel_check: Optional[callable] = None,
+    raise_on_error: bool = False,
 ) -> List[Snippet]:
     """Search using Brave Search API."""
     url = "https://api.search.brave.com/res/v1/web/search"
@@ -89,6 +94,8 @@ async def brave_search(
     backoff = 1
     max_retries = BRAVE_MAX_RETRIES
     data = None
+    # A separate semaphore for fetching content to avoid unbounded concurrent fetches
+    fetch_semaphore = asyncio.Semaphore(CONCURRENCY)
 
     # Retry loop for API call
     for attempt in range(max_retries + 1):
@@ -101,21 +108,26 @@ async def brave_search(
                         if attempt < max_retries:
                             retry_after = _retry_after_seconds(resp.headers)
                             wait_time = retry_after or (backoff * (2 ** attempt) + random.uniform(0, 0.5))
-                            if retry_after:
-                                throttle_state["delay_s"] = min(
-                                    max(current_delay, retry_after),
-                                    BRAVE_MAX_DELAY_S,
-                                )
-                            else:
-                                throttle_state["delay_s"] = min(
-                                    max(current_delay * 2, BRAVE_QUERY_DELAY_S),
-                                    BRAVE_MAX_DELAY_S,
-                                )
+                            # Update throttle_state under lock to avoid races
+                            async with throttle_lock:
+                                if retry_after:
+                                    throttle_state["delay_s"] = min(
+                                        max(current_delay, retry_after),
+                                        BRAVE_MAX_DELAY_S,
+                                    )
+                                else:
+                                    throttle_state["delay_s"] = min(
+                                        max(current_delay * 2, BRAVE_QUERY_DELAY_S),
+                                        BRAVE_MAX_DELAY_S,
+                                    )
                             logger.warning(f"Brave API rate limit (429). Retrying in {wait_time}s...")
                             await asyncio.sleep(wait_time)
                             continue
                         else:
-                            logger.error("Brave API rate limit exceeded after retries.")
+                            msg = "Brave API rate limit exceeded after retries."
+                            if raise_on_error:
+                                raise ExternalServiceError("brave", msg)
+                            logger.error(msg)
                             return []
                             
                     if resp.status != 200:
@@ -125,8 +137,10 @@ async def brave_search(
                     data = await resp.json()
                     break # Success
         except Exception as e:
+            logger.exception("Brave search connection error for query '%s': %s", query, e)
             if attempt == max_retries:
-                logger.error(f"Brave search connection error: {e}")
+                if raise_on_error:
+                    raise ExternalServiceError("brave", str(e)) from e
                 return []
             await asyncio.sleep(1)
 
@@ -136,13 +150,24 @@ async def brave_search(
     try:     
         results = data.get("web", {}).get("results", [])
         
-        # Fetch content for each result
+        # Fetch content for each result with bounded concurrency
+        async def bounded_fetch(u: str):
+            if cancel_check and cancel_check():
+                return ""
+            async with fetch_semaphore:
+                try:
+                    return await fetch_text(session, u)
+                except ExternalServiceError as exc:
+                    logger.warning("Fetch failed for %s: %s", u, exc)
+                    return ""
+
         fetch_tasks = []
         for r in results:
             u = r.get("url")
-            if not u: continue
-            fetch_tasks.append(fetch_text(session, u))
-            
+            if not u:
+                continue
+            fetch_tasks.append(bounded_fetch(u))
+
         contents = await asyncio.gather(*fetch_tasks)
         
         for r, content in zip(results, contents):
@@ -158,8 +183,10 @@ async def brave_search(
             snippets.append(s)
             
     except Exception as e:
-        logger.error(f"Brave search processing failed for '{query}': {e}")
-        
+        logger.exception("Brave search processing failed for '%s': %s", query, e)
+        if raise_on_error:
+            raise ExternalServiceError("brave", str(e)) from e
+
     return snippets
 
 async def check_relevance(subject: str, title: str, abstract: str) -> bool:
@@ -188,6 +215,8 @@ async def semantic_search(
     throttle_state: Dict[str, float],
     subject: str,
     limit: int = 20,
+    cancel_check: Optional[callable] = None,
+    raise_on_error: bool = False,
 ) -> List[Snippet]:
     """Search using Semantic Scholar API."""
     limit = min(limit, MAX_URLS_PER_SOURCE)
@@ -219,21 +248,26 @@ async def semantic_search(
                         if attempt < max_retries:
                             retry_after = _retry_after_seconds(resp.headers)
                             wait_time = retry_after or (backoff * (2 ** attempt) + random.uniform(0.5, 1.5))
-                            if retry_after:
-                                throttle_state["delay_s"] = min(
-                                    max(current_delay, retry_after),
-                                    SEMANTIC_MAX_DELAY_S,
-                                )
-                            else:
-                                throttle_state["delay_s"] = min(
-                                    max(current_delay * 2, SEMANTIC_QUERY_DELAY_S),
-                                    SEMANTIC_MAX_DELAY_S,
-                                )
+                            # Update throttle_state under lock
+                            async with throttle_lock:
+                                if retry_after:
+                                    throttle_state["delay_s"] = min(
+                                        max(current_delay, retry_after),
+                                        SEMANTIC_MAX_DELAY_S,
+                                    )
+                                else:
+                                    throttle_state["delay_s"] = min(
+                                        max(current_delay * 2, SEMANTIC_QUERY_DELAY_S),
+                                        SEMANTIC_MAX_DELAY_S,
+                                    )
                             logger.warning(f"Semantic Scholar rate limit (429). Retrying in {wait_time}s...")
                             await asyncio.sleep(wait_time)
                             continue
                         else:
-                            logger.error("Semantic Scholar rate limit exceeded after retries.")
+                            msg = "Semantic Scholar rate limit exceeded after retries."
+                            if raise_on_error:
+                                raise ExternalServiceError("semantic_scholar", msg)
+                            logger.error(msg)
                             return []
 
                     if resp.status != 200:
@@ -242,8 +276,10 @@ async def semantic_search(
                     data = await resp.json()
                     break # Success
         except Exception as e:
+            logger.exception("Semantic search connection error for query '%s': %s", query, e)
             if attempt == max_retries:
-                logger.error(f"Semantic search failed for '{query}': {e}")
+                if raise_on_error:
+                    raise ExternalServiceError("semantic_scholar", str(e)) from e
                 return []
             await asyncio.sleep(1)
             
@@ -252,6 +288,8 @@ async def semantic_search(
 
     async def process_paper(session, p):
         try:
+            if cancel_check and cancel_check():
+                return None
             # Filter by citation count
             citation_count = p.get("citationCount", 0)
             if citation_count < MIN_CITATION_COUNT:
@@ -288,9 +326,12 @@ async def semantic_search(
                 body = abstract
             elif url:
                 # Try to fetch full text
-                fetched = await fetch_text(session, url)
-                if fetched and len(fetched) > len(abstract or ""):
-                    body = fetched
+                try:
+                    fetched = await fetch_text(session, url)
+                    if fetched and len(fetched) > len(abstract or ""):
+                        body = fetched
+                except ExternalServiceError as exc:
+                    logger.warning("Failed to fetch full text for %s: %s", url, exc)
             
             # Fallback
             if not body:
@@ -305,7 +346,7 @@ async def semantic_search(
                 abstract=abstract
             )
         except Exception as e:
-            logger.warning(f"Error processing paper {p.get('title')}: {e}")
+            logger.exception("Error processing paper %s: %s", p.get('title'), e)
             return None
 
     try:
@@ -315,11 +356,13 @@ async def semantic_search(
         snippets = [r for r in results if r is not None]
             
     except Exception as e:
-        logger.error(f"Semantic search processing failed for '{query}': {e}")
-        
+        logger.exception("Semantic search processing failed for '%s': %s", query, e)
+        if raise_on_error:
+            raise ExternalServiceError("semantic_scholar", str(e)) from e
+
     return snippets
 
-async def search_all(keywords_dict: Dict[str, List[str]], subject: str = "") -> List[Snippet]:
+async def search_all(keywords_dict: Dict[str, List[str]], subject: str = "", cancel_check: Optional[callable] = None, raise_on_error: bool = False) -> List[Snippet]:
     """Orchestrate search across all sources."""
     all_snippets = []
     brave_semaphore = asyncio.Semaphore(BRAVE_CONCURRENCY)
@@ -334,7 +377,7 @@ async def search_all(keywords_dict: Dict[str, List[str]], subject: str = "") -> 
         
         # Brave Search Tasks
         for q in keywords_dict.get("general", []):
-            tasks.append(brave_search(q, session, brave_semaphore, brave_throttle_lock, brave_throttle_state))
+            tasks.append(brave_search(q, session, brave_semaphore, brave_throttle_lock, brave_throttle_state, cancel_check=cancel_check, raise_on_error=raise_on_error))
             
         # Semantic Scholar Tasks (serialize to reduce rate limiting pressure)
         brave_results = await asyncio.gather(*tasks)
@@ -348,6 +391,8 @@ async def search_all(keywords_dict: Dict[str, List[str]], subject: str = "") -> 
                     semantic_throttle_lock,
                     semantic_throttle_state,
                     subject,
+                    cancel_check=cancel_check,
+                    raise_on_error=raise_on_error,
                 )
             )
         

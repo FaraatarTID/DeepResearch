@@ -6,7 +6,7 @@ import uuid
 from .config import validate_config
 from .core import generate_keywords, filter_snippets, save_bibliometrics, synthesise
 from .processing import Snippet
-from .search import search_all
+from . import search as _search
 from .utils import logger
 
 
@@ -34,6 +34,7 @@ async def run_research(
     general_rounds: int,
     academic_rounds: int,
     status_callback: Optional[Callable[[str], None]] = None,
+    cancel_check: Optional[Callable[[], bool]] = None,
 ) -> PipelineResult:
     """Run the research pipeline and return a structured result."""
     run_id = uuid.uuid4().hex[:8]
@@ -61,6 +62,12 @@ async def run_research(
         )
 
     _notify(status_callback, f"🧾 Run ID: {run_id}")
+    # Early cancellation check to avoid starting external calls when requested
+    if cancel_check and cancel_check():
+        error = "Cancelled"
+        _notify(status_callback, error)
+        return finalize(error=error)
+
     step_start = time.perf_counter()
     valid, msg = validate_config()
     timings["config_s"] = time.perf_counter() - step_start
@@ -76,9 +83,15 @@ async def run_research(
         timings["keywords_s"] = time.perf_counter() - step_start
         _notify(status_callback, f"✅ Keywords: {keywords}")
 
+        if cancel_check and cancel_check():
+            error = "Cancelled"
+            _notify(status_callback, error)
+            return finalize(error=error)
+
         _notify(status_callback, "🔍 Searching sources...")
         step_start = time.perf_counter()
-        snippets = await search_all(keywords, subject=subject)
+        # Consider search failures fatal for the pipeline and raise structured errors
+        snippets = await _search.search_all(keywords, subject=subject, cancel_check=cancel_check, raise_on_error=True)
         timings["search_s"] = time.perf_counter() - step_start
         _notify(status_callback, f"📊 Found {len(snippets)} raw snippets")
 
@@ -93,6 +106,11 @@ async def run_research(
         timings["filter_s"] = time.perf_counter() - step_start
         _notify(status_callback, f"✅ Kept {len(snippets)} quality snippets")
 
+        if cancel_check and cancel_check():
+            error = "Cancelled"
+            _notify(status_callback, error)
+            return finalize(error=error)
+
         if not snippets:
             error = "No quality snippets left."
             _notify(status_callback, error)
@@ -105,11 +123,11 @@ async def run_research(
 
         _notify(status_callback, "🧠 Synthesizing report...")
         step_start = time.perf_counter()
-        report = await synthesise(snippets, subject)
+        report = await synthesise(snippets, subject, cancel_check=cancel_check)
         timings["synthesis_s"] = time.perf_counter() - step_start
         return finalize(report=report, biblio_text=biblio_text, snippets=snippets)
     except Exception as exc:
+        logger.exception("Pipeline error (run_id=%s): %s", run_id, exc)
         error = f"Error: {exc}"
         _notify(status_callback, error)
-        logger.exception("Pipeline error (run_id=%s)", run_id)
         return finalize(error=error)

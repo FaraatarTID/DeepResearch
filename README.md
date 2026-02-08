@@ -141,3 +141,30 @@ If you encounter any issues or have questions, please open an issue on GitHub.
 ---
 
 Made with ❤️ using Streamlit and Google Gemini AI
+
+## Reliability & Pre-Mortem Checks
+
+This project includes a few features to reduce silent failures and make production
+issues diagnosable:
+
+- **Structured external errors**: `deep_research.utils.ExternalServiceError` is
+   raised by `gemini_complete` and `fetch_text` on persistent failures. The
+   pipeline opts into surfacing fatal errors from searches. This avoids silent
+   empty-string fallbacks that hide root causes.
+- **Cooperative cancellation**: `run_research` accepts a `cancel_check` callable
+   (e.g., `lambda: stop_event.is_set()`) which is checked early and propagated
+   to searches and synthesis so UI stop requests abort long-running runs.
+- **Atomic file writes**: DOCX and text outputs are written atomically to avoid
+   partial files on crashes or interruptions.
+- **Pre-mortem static checks**: `scripts/pre_mortem_checks.py` scans for
+   patterns like `except: pass` and other anti-patterns. It's run in CI and as a
+   pre-commit hook.
+
+CI will run `pre-commit` and `flake8` and fail on issues. To run checks locally:
+
+```bash
+python -m pip install -r requirements-dev.txt
+pre-commit install
+pre-commit run --all-files
+python scripts/pre_mortem_checks.py
+```

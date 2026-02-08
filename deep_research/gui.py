@@ -8,7 +8,7 @@ import os
 
 from .config import OUTPUT_FILE
 from .pipeline import run_research
-from .utils import build_doc, safe_save, logger
+from .utils import build_doc, safe_save, safe_write_text, logger
 
 import queue
 import logging
@@ -124,9 +124,13 @@ class ResearchGUI:
         self.log_handler.setFormatter(formatter)
         
         root_logger = logging.getLogger()
-        root_logger.addHandler(self.log_handler)
+        # Avoid adding duplicate handlers
+        if self.log_handler not in root_logger.handlers:
+            root_logger.addHandler(self.log_handler)
         
-        threading.Thread(target=self.run_async_research, daemon=True).start()
+        # Start a dedicated worker thread and keep a reference for clean shutdown
+        self.worker_thread = threading.Thread(target=self.run_async_research, daemon=False)
+        self.worker_thread.start()
         
     def stop_research(self):
         if self.is_running:
@@ -134,11 +138,26 @@ class ResearchGUI:
             logger.warning("Stopping research...")
             
     def run_async_research(self):
+        # Use an explicit event loop in the thread to avoid using asyncio.run in library code
+        loop = asyncio.new_event_loop()
         try:
-            asyncio.run(self.research_task())
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(self.research_task())
         except Exception as e:
-            logger.error(f"Research failed: {e}")
+            logger.exception("Research failed: %s", e)
         finally:
+            try:
+                loop.run_until_complete(loop.shutdown_asyncgens())
+            except Exception as e:
+                logger.exception("Error during shutdown_asyncgens: %s", e)
+            try:
+                asyncio.set_event_loop(None)
+            except Exception as e:
+                logger.exception("Error clearing event loop: %s", e)
+            try:
+                loop.close()
+            except Exception as e:
+                logger.exception("Error closing event loop: %s", e)
             self.cleanup()
             
     async def research_task(self):
@@ -156,6 +175,7 @@ class ResearchGUI:
             general_rounds=self.general_var.get(),
             academic_rounds=self.academic_var.get(),
             status_callback=log_status,
+            cancel_check=lambda: self.stop_event.is_set(),
         )
 
         if result.error:
@@ -167,14 +187,23 @@ class ResearchGUI:
         
         # Also save as markdown
         md_path = OUTPUT_FILE.with_suffix(".md")
-        md_path.write_text(result.report or "", encoding="utf-8")
-        logger.info(f"✅ Saved Markdown report to {md_path}")
+        if safe_write_text(md_path, result.report or "", encoding="utf-8"):
+            logger.info("✅ Saved Markdown report to %s", md_path)
+        else:
+            logger.error("Failed to save Markdown report to %s", md_path)
         
         logger.info("Research Complete!")
         
     def cleanup(self):
         self.is_running = False
         self.root.after(0, self.reset_ui)
+        # Attempt to join the worker thread gracefully (short timeout)
+        try:
+            if hasattr(self, 'worker_thread') and self.worker_thread is not None:
+                if self.worker_thread.is_alive():
+                    self.worker_thread.join(timeout=1)
+        except Exception:
+            logger.exception("Error while joining worker thread")
         
     def poll_log_queue(self):
         """Check for new logs in the queue and update UI."""

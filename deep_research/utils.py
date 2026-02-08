@@ -22,6 +22,21 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
+
+class ExternalServiceError(Exception):
+    """Raised when an external service (LLM, API) fails after retries.
+
+    Attributes:
+        service: short name of the service (e.g., 'gemini')
+        message: original error message
+        status: optional status or code
+    """
+    def __init__(self, service: str, message: str, status: int = None):
+        super().__init__(f"{service}: {message}")
+        self.service = service
+        self.message = message
+        self.status = status
+
 def log_error(context: str, error: str):
     """Log an error with context."""
     logger.error(f"[{context}] {error}")
@@ -31,10 +46,20 @@ def safe_save(doc: Document, base_path: Path):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     path = base_path.with_name(f"{base_path.stem}_{timestamp}{base_path.suffix}")
     try:
-        doc.save(path)
-        logger.info(f"✅ Saved report to {path}")
+        # Save to a temporary file in the same directory then atomically replace
+        import io, os
+        tmp_path = path.with_suffix(path.suffix + ".tmp")
+        # Use an in-memory buffer then write bytes atomically to avoid partial files
+        bio = io.BytesIO()
+        doc.save(bio)
+        bio.seek(0)
+        tmp_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(tmp_path, "wb") as f:
+            f.write(bio.read())
+        os.replace(str(tmp_path), str(path))
+        logger.info("✅ Saved report to %s", path)
     except Exception as e:
-        log_error("Save", str(e))
+        logger.exception("Failed to save DOCX to %s: %s", path, e)
 
 def build_doc(report: str) -> Document:
     """Convert markdown report to a Word document."""
@@ -86,7 +111,6 @@ def build_doc(report: str) -> Document:
         
         # Basic markdown parsing for bold and italic
         # Note: This is a simplified parser from the original code
-        import re
         tokens = re.split(r"(\*\*[^*]+\*\*|\*[^*]+\*)", line)
         
         for tok in tokens:
@@ -109,6 +133,28 @@ def build_doc(report: str) -> Document:
             run.font.size = Pt(12)
     
     return doc
+
+
+def safe_write_text(path: Path, text: str, encoding: str = "utf-8") -> bool:
+    """Write text to `path` atomically. Returns True on success."""
+    try:
+        tmp = path.with_name(f"{path.name}.tmp")
+        # Ensure parent exists
+        tmp.parent.mkdir(parents=True, exist_ok=True)
+        tmp.write_text(text, encoding=encoding)
+        # Atomic replace
+        import os
+        os.replace(str(tmp), str(path))
+        logger.info("Wrote file %s (atomic)", path)
+        return True
+    except Exception as e:
+        logger.exception("Failed to write file %s: %s", path, e)
+        try:
+            if tmp.exists():
+                tmp.unlink()
+        except Exception as inner_e:
+            logger.exception("Failed to remove temp file %s: %s", tmp, inner_e)
+        return False
 
 # Initialize Gemini Client lazily
 _client = None
@@ -142,6 +188,13 @@ def get_client():
         _client = genai.Client(api_key=GEMINI_KEY)
     return _client
 
+
+def reset_client():
+    """Reset the cached Gemini client (for API key rotation in UI)."""
+    global _client
+    _client = None
+    logger.info("Gemini client reset")
+
 async def gemini_complete(prompt: str, max_tokens: int = 6000) -> str:
     """Generate text using Gemini."""
     max_retries = 5
@@ -160,6 +213,10 @@ async def gemini_complete(prompt: str, max_tokens: int = 6000) -> str:
             )
             return response.text
         except Exception as e:
+            # Immediately record exception so failures are visible to pre-mortem checks
+            logger.exception("Gemini API exception: %s", e)
+            # Log full exception with stack trace for easier debugging in production
+            import traceback
             error_str = str(e)
             if "503" in error_str or "429" in error_str:
                 if attempt < max_retries:
@@ -168,9 +225,12 @@ async def gemini_complete(prompt: str, max_tokens: int = 6000) -> str:
                         wait_time = min(retry_delay, GEMINI_MAX_DELAY_S)
                     else:
                         wait_time = min(backoff * (2 ** attempt), GEMINI_MAX_DELAY_S)
-                    logger.warning(f"Gemini API error ({error_str}). Retrying in {wait_time}s...")
+                    logger.warning("Gemini API error (%s). Retrying in %ss...", error_str, wait_time)
                     await asyncio.sleep(wait_time)
                     continue
-            
-            log_error("Gemini", error_str)
-            return ""
+
+            logger.exception("Gemini API error: %s", error_str)
+            # After exhausting retries, raise a structured error so callers
+            # can decide whether to fail fast or fallback. Preserve original
+            # exception as __cause__.
+            raise ExternalServiceError("gemini", error_str) from e

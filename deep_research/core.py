@@ -3,11 +3,11 @@ import asyncio
 import re
 import numpy as np
 from datetime import datetime
-from typing import List, Dict
+from typing import List, Dict, Optional
 from google import genai
 from .config import GEMINI_KEY, JOURNAL_H_INDEX_THRESHOLD, MAX_TOKENS_PER_URL, BIBLIO_FILE, MAX_SNIPPETS_TO_KEEP, MIN_CITATION_COUNT
 from .processing import Snippet, compress_text, is_quality_page, semantic_dedup
-from .utils import logger, log_error, gemini_complete
+from .utils import logger, log_error, gemini_complete, safe_write_text
 
 
 
@@ -140,11 +140,14 @@ def save_bibliometrics(snippets: List[Snippet]) -> str:
     text = generate_bibliometrics(snippets)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     path = BIBLIO_FILE.with_name(f"{BIBLIO_FILE.stem}_{timestamp}.txt")
-    path.write_text(text, encoding="utf-8")
-    logger.info(f"✅ Bibliometrics saved → {path}")
+    success = safe_write_text(path, text, encoding="utf-8")
+    if success:
+        logger.info("✅ Bibliometrics saved → %s", path)
+    else:
+        logger.error("Failed to save bibliometrics to %s", path)
     return text
 
-async def synthesise(snippets: List[Snippet], subject: str) -> str:
+async def synthesise(snippets: List[Snippet], subject: str, cancel_check: Optional[callable] = None) -> str:
     """Synthesize snippets into a final report."""
     # Prepare source list
     source_list = "\n".join(f"{idx+1}. {s.title}  {s.url}" for idx, s in enumerate(snippets))
@@ -157,8 +160,13 @@ async def synthesise(snippets: List[Snippet], subject: str) -> str:
         from pathlib import Path
         base_dir = Path(__file__).parent.parent
         sys_prompt = (base_dir / "system_prompt.txt").read_text(encoding="utf-8")
-    except Exception:
+    except Exception as e:
+        logger.exception("Failed to read system_prompt.txt, using default prompt: %s", e)
         sys_prompt = "You are a helpful research assistant."
+
+    if cancel_check and cancel_check():
+        logger.info("Synthesis cancelled before sending prompt to LLM")
+        return ""
 
     prompt = f"""
     {sys_prompt}

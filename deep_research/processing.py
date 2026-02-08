@@ -9,6 +9,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 from typing import List, Optional, Dict
 from .config import MAX_TOKENS_PER_URL, EST_CHAR_PER_TOKEN
 import logging
+from .utils import logger
 
 # Suppress PDF and Trafilatura warnings
 logging.getLogger("pdfminer").setLevel(logging.ERROR)
@@ -94,14 +95,16 @@ def pdf_to_text(data: bytes) -> str:
         with pdfplumber.open(io.BytesIO(data)) as pdf:
             text = "\n".join(page.extract_text() or "" for page in pdf.pages)
         return text
-    except Exception:
+    except Exception as e:
+        logger.exception("PDF parsing failed: %s", e)
         return ""
 
 def docx_to_text(data: bytes) -> str:
     """Extract text from DOCX bytes."""
     try:
         return docx2txt.process(io.BytesIO(data))
-    except Exception:
+    except Exception as e:
+        logger.exception("DOCX parsing failed: %s", e)
         return ""
 
 def semantic_dedup(texts: List[str], max_keep: int = 100) -> List[int]:

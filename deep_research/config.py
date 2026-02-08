@@ -19,8 +19,10 @@ def _get_secret(key, default=None):
         try:
             if key in st.secrets:
                 return st.secrets[key]
-        except (FileNotFoundError, KeyError):
-            pass
+        except (FileNotFoundError, KeyError) as e:
+            # Streamlit secrets access may raise depending on environment; log and fall back
+            import logging
+            logging.getLogger(__name__).warning("Streamlit secret access failed for %s: %s", key, e)
     
     # Fallback to environment variables
     return os.getenv(key, default)
