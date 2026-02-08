@@ -115,14 +115,14 @@ if "report" not in st.session_state:
 if "biblio_text" not in st.session_state:
     st.session_state.biblio_text = None
 
-    if start_btn and subject:
+if start_btn and subject:
     st.session_state.report = None
     st.session_state.biblio_text = None
     status_container = st.status("Starting research...", expanded=True)
-    
+
     # Add log expander
     log_expander = st.expander("View Logs", expanded=False)
-    
+
     # Setup logging
     st_handler = StreamlitHandler(log_expander)
     root_logger = logging.getLogger()
@@ -147,7 +147,7 @@ if "biblio_text" not in st.session_state:
 
             status_container.update(label="Research Complete!", state="complete", expanded=False)
             return result.report, result.biblio_text
-            
+
         except Exception as e:
             logger.exception("Error during run_with_status: %s", e)
             import traceback
