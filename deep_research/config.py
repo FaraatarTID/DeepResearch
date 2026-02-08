@@ -27,8 +27,10 @@ def _get_secret(key, default=None):
 
 # API Keys - prioritize Streamlit secrets, fallback to .env
 GEMINI_KEY = _get_secret("GEMINI_KEY")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-flash-lite-latest")
 BRAVE_API_KEY = _get_secret("BRAVE_API_KEY")
 UNPAYWALL_EMAIL = _get_secret("UNPAYWALL_EMAIL")
+SEMANTIC_SCHOLAR_API_KEY = _get_secret("SEMANTIC_SCHOLAR_API_KEY")
 
 # Configuration
 MAX_URLS_PER_SOURCE = int(os.getenv("MAX_URLS_PER_SOURCE", 500))
@@ -42,8 +44,10 @@ MIN_CITATION_COUNT = int(os.getenv("MIN_CITATION_COUNT", 3))  # Minimum citation
 USER_AGENT = os.getenv("USER_AGENT", "Mozilla/5.0 (compatible; DeepResearchBot/1.0)")
 BRAVE_MAX_RETRIES = int(os.getenv("BRAVE_MAX_RETRIES", 3))
 BRAVE_QUERY_DELAY_S = float(os.getenv("BRAVE_QUERY_DELAY_S", 0.2))
+BRAVE_MAX_DELAY_S = float(os.getenv("BRAVE_MAX_DELAY_S", 4.0))
 SEMANTIC_MAX_RETRIES = int(os.getenv("SEMANTIC_MAX_RETRIES", 5))
 SEMANTIC_QUERY_DELAY_S = float(os.getenv("SEMANTIC_QUERY_DELAY_S", 0.4))
+SEMANTIC_MAX_DELAY_S = float(os.getenv("SEMANTIC_MAX_DELAY_S", 8.0))
 
 # Paths
 BASE_DIR = Path(__file__).parent.parent
