@@ -90,8 +90,13 @@ You can adjust retry behavior and pacing via environment variables if you hit AP
 export BRAVE_MAX_RETRIES=3
 export BRAVE_CONCURRENCY=2
 export BRAVE_QUERY_DELAY_S=0.2
+export BRAVE_MAX_DELAY_S=4.0
+export GEMINI_MODEL=gemini-flash-latest
+export GEMINI_MAX_DELAY_S=60.0
 export SEMANTIC_MAX_RETRIES=5
 export SEMANTIC_QUERY_DELAY_S=0.4
+export SEMANTIC_MAX_DELAY_S=8.0
+export SEMANTIC_SCHOLAR_API_KEY=your_api_key_here
 ```
 
 ## Project Structure
