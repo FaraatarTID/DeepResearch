@@ -52,6 +52,14 @@ SEMANTIC_MAX_RETRIES = int(os.getenv("SEMANTIC_MAX_RETRIES", 5))
 SEMANTIC_QUERY_DELAY_S = float(os.getenv("SEMANTIC_QUERY_DELAY_S", 0.4))
 SEMANTIC_MAX_DELAY_S = float(os.getenv("SEMANTIC_MAX_DELAY_S", 8.0))
 
+# Gemini rate limiting / budgeting
+GEMINI_MAX_CONCURRENCY = int(os.getenv("GEMINI_MAX_CONCURRENCY", 2))
+GEMINI_RPS = float(os.getenv("GEMINI_RPS", 1.0))  # requests per second
+GEMINI_TOKEN_BUDGET_PER_RUN = int(os.getenv("GEMINI_TOKEN_BUDGET_PER_RUN", 20000))
+GEMINI_CIRCUIT_FAILURE_THRESHOLD = int(os.getenv("GEMINI_CIRCUIT_FAILURE_THRESHOLD", 5))
+GEMINI_CIRCUIT_COOLDOWN_S = float(os.getenv("GEMINI_CIRCUIT_COOLDOWN_S", 60.0))
+GEMINI_ENABLE_RELEVANCE_CACHE = os.getenv("GEMINI_ENABLE_RELEVANCE_CACHE", "true").lower() in ("1", "true", "yes")
+
 # Paths
 BASE_DIR = Path(__file__).parent.parent
 BIBLIO_FILE = BASE_DIR / "bibliometrics.txt"

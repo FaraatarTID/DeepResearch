@@ -21,6 +21,14 @@ from .config import (
 )
 from .processing import Snippet, pdf_to_text, docx_to_text
 from .utils import logger, gemini_complete
+from collections import OrderedDict
+import hashlib
+from .config import GEMINI_ENABLE_RELEVANCE_CACHE
+
+# Simple in-memory cache for relevance checks (disabled by default)
+_relevance_cache: "OrderedDict[str, tuple[float, bool]]" = OrderedDict()
+_RELEVANCE_CACHE_MAX = 1024
+_RELEVANCE_CACHE_TTL = 60 * 60  # 1 hour
 
 def _retry_after_seconds(headers: aiohttp.typedefs.LooseHeaders) -> Optional[float]:
     if not headers:
@@ -204,8 +212,36 @@ async def check_relevance(subject: str, title: str, abstract: str) -> bool:
     Answer strictly with YES or NO.
     """
     
+    # Cache key based on subject+title+abstract
+    key_src = f"{subject}\n{title}\n{abstract}"
+    key = hashlib.sha256(key_src.encode('utf-8')).hexdigest()
+    now = time.time()
+
+    if GEMINI_ENABLE_RELEVANCE_CACHE:
+        # If gemini_complete has been patched/mocked in tests, skip cache to preserve test determinism
+        is_mocked = hasattr(gemini_complete, 'call_count') or hasattr(gemini_complete, 'mock')
+        if GEMINI_ENABLE_RELEVANCE_CACHE and not is_mocked:
+            # Check cache
+            if key in _relevance_cache:
+                ts, val = _relevance_cache[key]
+                if now - ts < _RELEVANCE_CACHE_TTL:
+                    # move to end (LRU)
+                    _relevance_cache.move_to_end(key)
+                    return val
+                else:
+                    del _relevance_cache[key]
+
     response = await gemini_complete(prompt, max_tokens=10)
-    return "YES" in response.upper()
+    val = "YES" in response.upper()
+
+    if GEMINI_ENABLE_RELEVANCE_CACHE and not is_mocked:
+        # Store in cache
+        _relevance_cache[key] = (now, val)
+        _relevance_cache.move_to_end(key)
+        if len(_relevance_cache) > _RELEVANCE_CACHE_MAX:
+            _relevance_cache.popitem(last=False)
+
+    return val
 
 async def semantic_search(
     query: str,

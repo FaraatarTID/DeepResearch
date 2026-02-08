@@ -8,7 +8,8 @@ from docx.shared import Pt
 from google import genai
 import asyncio
 import re
-from .config import GEMINI_KEY, GEMINI_MODEL, GEMINI_MAX_DELAY_S
+from .config import GEMINI_KEY, GEMINI_MODEL, GEMINI_MAX_DELAY_S, GEMINI_MAX_CONCURRENCY, GEMINI_RPS, GEMINI_CIRCUIT_FAILURE_THRESHOLD, GEMINI_CIRCUIT_COOLDOWN_S
+import time
 
 # Configure logging
 logging.basicConfig(
@@ -159,6 +160,15 @@ def safe_write_text(path: Path, text: str, encoding: str = "utf-8") -> bool:
 # Initialize Gemini Client lazily
 _client = None
 
+# Concurrency and rate-limiting primitives for Gemini
+_gemini_semaphore = asyncio.Semaphore(GEMINI_MAX_CONCURRENCY)
+_gemini_throttle_lock = asyncio.Lock()
+_gemini_throttle_state = {"last_request": 0.0}
+
+# Circuit-breaker state
+_gemini_fail_count = 0
+_gemini_circuit_open_until = 0.0
+
 
 def _parse_retry_delay_seconds(error_str: str) -> Optional[float]:
     """Extract retry delay seconds from Gemini error messages."""
@@ -199,25 +209,44 @@ async def gemini_complete(prompt: str, max_tokens: int = 6000) -> str:
     """Generate text using Gemini."""
     max_retries = 5
     backoff = 2
-    
+    # Respect circuit-breaker
+    now = time.monotonic()
+    global _gemini_fail_count, _gemini_circuit_open_until
+    if now < _gemini_circuit_open_until:
+        raise ExternalServiceError("gemini", f"circuit-open until {_gemini_circuit_open_until - now:.1f}s")
+
+    # Enforce concurrency and RPS limits
+    delay_s = 1.0 / max(1.0, GEMINI_RPS)
+
     for attempt in range(max_retries + 1):
         try:
-            client = get_client()
-            response = client.models.generate_content(
-                model=GEMINI_MODEL,
-                contents=prompt,
-                config=genai.types.GenerateContentConfig(
-                    max_output_tokens=max_tokens,
-                    temperature=0.3
+            async with _gemini_semaphore:
+                # throttle requests by RPS
+                async with _gemini_throttle_lock:
+                    now = time.monotonic()
+                    wait_time = _gemini_throttle_state.get("last_request", 0.0) + delay_s - now
+                    if wait_time > 0:
+                        await asyncio.sleep(wait_time)
+                    _gemini_throttle_state["last_request"] = time.monotonic()
+
+                client = get_client()
+                response = client.models.generate_content(
+                    model=GEMINI_MODEL,
+                    contents=prompt,
+                    config=genai.types.GenerateContentConfig(
+                        max_output_tokens=max_tokens,
+                        temperature=0.3
+                    )
                 )
-            )
-            return response.text
+                # Successful call: reset failure counter
+                _gemini_fail_count = 0
+                return response.text
         except Exception as e:
             # Immediately record exception so failures are visible to pre-mortem checks
             logger.exception("Gemini API exception: %s", e)
-            # Log full exception with stack trace for easier debugging in production
             import traceback
             error_str = str(e)
+            # If rate-limited, backoff and retry
             if "503" in error_str or "429" in error_str:
                 if attempt < max_retries:
                     retry_delay = _parse_retry_delay_seconds(error_str)
@@ -229,8 +258,12 @@ async def gemini_complete(prompt: str, max_tokens: int = 6000) -> str:
                     await asyncio.sleep(wait_time)
                     continue
 
+            # Record failure for circuit-breaker
+            _gemini_fail_count += 1
+            if _gemini_fail_count >= GEMINI_CIRCUIT_FAILURE_THRESHOLD:
+                _gemini_circuit_open_until = time.monotonic() + GEMINI_CIRCUIT_COOLDOWN_S
+                logger.error("Gemini circuit opened for %ss due to repeated failures", GEMINI_CIRCUIT_COOLDOWN_S)
+
             logger.exception("Gemini API error: %s", error_str)
-            # After exhausting retries, raise a structured error so callers
-            # can decide whether to fail fast or fallback. Preserve original
-            # exception as __cause__.
+            # After exhausting retries, raise a structured error so callers can decide how to handle
             raise ExternalServiceError("gemini", error_str) from e
