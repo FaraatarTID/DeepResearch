@@ -7,7 +7,7 @@ from docx import Document
 from docx.shared import Pt
 from google import genai
 import asyncio
-from .config import GEMINI_KEY
+from .config import GEMINI_KEY, GEMINI_MODEL
 
 # Configure logging
 logging.basicConfig(
@@ -129,7 +129,7 @@ async def gemini_complete(prompt: str, max_tokens: int = 6000) -> str:
         try:
             client = get_client()
             response = client.models.generate_content(
-                model="gemini-flash-latest",
+                model=GEMINI_MODEL,
                 contents=prompt,
                 config=genai.types.GenerateContentConfig(
                     max_output_tokens=max_tokens,

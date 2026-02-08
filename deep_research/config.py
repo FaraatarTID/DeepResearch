@@ -27,6 +27,7 @@ def _get_secret(key, default=None):
 
 # API Keys - prioritize Streamlit secrets, fallback to .env
 GEMINI_KEY = _get_secret("GEMINI_KEY")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-flash-lite-latest")
 BRAVE_API_KEY = _get_secret("BRAVE_API_KEY")
 UNPAYWALL_EMAIL = _get_secret("UNPAYWALL_EMAIL")
 SEMANTIC_SCHOLAR_API_KEY = _get_secret("SEMANTIC_SCHOLAR_API_KEY")
