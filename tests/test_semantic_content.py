@@ -4,10 +4,9 @@ from unittest.mock import MagicMock, patch
 from deep_research.search import semantic_search
 
 class TestSemanticContent(unittest.TestCase):
-    @patch('aiohttp.ClientSession')
     @patch('deep_research.search.check_relevance')
     @patch('deep_research.search.fetch_text')
-    def test_semantic_search_fallback(self, mock_fetch_text, mock_check_relevance, mock_session_cls):
+    def test_semantic_search_fallback(self, mock_fetch_text, mock_check_relevance):
         mock_check_relevance.return_value = True
         async def run_test():
             # Mock fetch_text to return full content
@@ -15,7 +14,6 @@ class TestSemanticContent(unittest.TestCase):
             
             # Setup mock session for API call
             mock_session = MagicMock()
-            mock_session_cls.return_value.__aenter__.return_value = mock_session
             
             # Mock API response: Paper with no abstract but with URL
             mock_resp = MagicMock()
@@ -43,7 +41,17 @@ class TestSemanticContent(unittest.TestCase):
             
             # Run search
             semaphore = asyncio.Semaphore(1)
-            results = await semantic_search("query", semaphore, subject="test subject", limit=1)
+            throttle_lock = asyncio.Lock()
+            throttle_state = {"last_request": 0.0, "delay_s": 0.0}
+            results = await semantic_search(
+                "query",
+                mock_session,
+                semaphore,
+                throttle_lock,
+                throttle_state,
+                subject="test subject",
+                limit=1,
+            )
             
             # Verify
             self.assertEqual(len(results), 1)

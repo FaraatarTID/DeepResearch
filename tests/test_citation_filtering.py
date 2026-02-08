@@ -6,15 +6,13 @@ from deep_research.processing import Snippet
 
 
 class TestCitationFiltering(unittest.TestCase):
-    @patch('aiohttp.ClientSession')
     @patch('deep_research.search.check_relevance')
-    def test_citation_filtering_below_threshold(self, mock_check_relevance, mock_session_cls):
+    def test_citation_filtering_below_threshold(self, mock_check_relevance):
         """Test that papers with citations below threshold are filtered out."""
         mock_check_relevance.return_value = True # Assume relevant
         async def run_test():
             # Setup mock session
             mock_session = MagicMock()
-            mock_session_cls.return_value.__aenter__.return_value = mock_session
             
             # Mock API response with papers having different citation counts
             mock_resp = MagicMock()
@@ -55,22 +53,30 @@ class TestCitationFiltering(unittest.TestCase):
             
             # Run search
             semaphore = asyncio.Semaphore(1)
-            results = await semantic_search("test query", semaphore, subject="test subject", limit=2)
+            throttle_lock = asyncio.Lock()
+            throttle_state = {"last_request": 0.0, "delay_s": 0.0}
+            results = await semantic_search(
+                "test query",
+                mock_session,
+                semaphore,
+                throttle_lock,
+                throttle_state,
+                subject="test subject",
+                limit=2,
+            )
             
             # Verify: both papers should be filtered out
             self.assertEqual(len(results), 0)
         
         asyncio.run(run_test())
 
-    @patch('aiohttp.ClientSession')
     @patch('deep_research.search.check_relevance')
-    def test_citation_filtering_above_threshold(self, mock_check_relevance, mock_session_cls):
+    def test_citation_filtering_above_threshold(self, mock_check_relevance):
         """Test that papers with citations at or above threshold are kept."""
         mock_check_relevance.return_value = True # Assume relevant
         async def run_test():
             # Setup mock session
             mock_session = MagicMock()
-            mock_session_cls.return_value.__aenter__.return_value = mock_session
             
             # Mock API response
             mock_resp = MagicMock()
@@ -109,7 +115,17 @@ class TestCitationFiltering(unittest.TestCase):
             
             # Run search
             semaphore = asyncio.Semaphore(1)
-            results = await semantic_search("test query", semaphore, subject="test subject", limit=2)
+            throttle_lock = asyncio.Lock()
+            throttle_state = {"last_request": 0.0, "delay_s": 0.0}
+            results = await semantic_search(
+                "test query",
+                mock_session,
+                semaphore,
+                throttle_lock,
+                throttle_state,
+                subject="test subject",
+                limit=2,
+            )
             
             # Verify: both papers should be kept
             self.assertEqual(len(results), 2)
@@ -120,15 +136,13 @@ class TestCitationFiltering(unittest.TestCase):
         
         asyncio.run(run_test())
 
-    @patch('aiohttp.ClientSession')
     @patch('deep_research.search.check_relevance')
-    def test_citation_filtering_mixed(self, mock_check_relevance, mock_session_cls):
+    def test_citation_filtering_mixed(self, mock_check_relevance):
         """Test filtering with mixed citation counts."""
         mock_check_relevance.return_value = True # Assume relevant
         async def run_test():
             # Setup mock session
             mock_session = MagicMock()
-            mock_session_cls.return_value.__aenter__.return_value = mock_session
             
             mock_resp = MagicMock()
             mock_resp.status = 200
@@ -186,7 +200,17 @@ class TestCitationFiltering(unittest.TestCase):
             
             # Run search
             semaphore = asyncio.Semaphore(1)
-            results = await semantic_search("test query", semaphore, subject="test subject", limit=4)
+            throttle_lock = asyncio.Lock()
+            throttle_state = {"last_request": 0.0, "delay_s": 0.0}
+            results = await semantic_search(
+                "test query",
+                mock_session,
+                semaphore,
+                throttle_lock,
+                throttle_state,
+                subject="test subject",
+                limit=4,
+            )
             
             # Verify: only papers 2 and 4 should be kept
             self.assertEqual(len(results), 2)
@@ -195,14 +219,12 @@ class TestCitationFiltering(unittest.TestCase):
         
         asyncio.run(run_test())
 
-    @patch('aiohttp.ClientSession')
     @patch('deep_research.search.check_relevance')
-    def test_missing_citation_count(self, mock_check_relevance, mock_session_cls):
+    def test_missing_citation_count(self, mock_check_relevance):
         """Test that papers with missing citationCount are filtered out (default to 0)."""
         mock_check_relevance.return_value = True # Assume relevant
         async def run_test():
             mock_session = MagicMock()
-            mock_session_cls.return_value.__aenter__.return_value = mock_session
             
             mock_resp = MagicMock()
             mock_resp.status = 200
@@ -229,7 +251,17 @@ class TestCitationFiltering(unittest.TestCase):
             mock_get_ctx.__aenter__.return_value = mock_resp
             
             semaphore = asyncio.Semaphore(1)
-            results = await semantic_search("test query", semaphore, subject="test subject", limit=1)
+            throttle_lock = asyncio.Lock()
+            throttle_state = {"last_request": 0.0, "delay_s": 0.0}
+            results = await semantic_search(
+                "test query",
+                mock_session,
+                semaphore,
+                throttle_lock,
+                throttle_state,
+                subject="test subject",
+                limit=1,
+            )
             
             # Should be filtered out (defaults to 0)
             self.assertEqual(len(results), 0)
