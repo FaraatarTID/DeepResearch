@@ -153,6 +153,32 @@ def extract_key_sentences(text: str, max_chars: int) -> str:
         return text[:max_chars]
     return " ".join(picked)
 
+def extract_facts(text: str, max_facts: int = 12) -> List[str]:
+    """Extract factual-looking sentences for strict structured input."""
+    if not text:
+        return []
+    sentences = _sentence_candidates(text)
+    if not sentences:
+        return []
+
+    facts = []
+    for s in sentences:
+        low = s.lower()
+        # Drop instruction-like or conversational lines
+        if any(pat in low for pat in INJECTION_PATTERNS):
+            continue
+        # Keep sentences with numeric evidence, years, or citations
+        if (
+            re.search(r"\b(19|20)\d{2}\b", s)
+            or re.search(r"\[\d+\]", s)
+            or re.search(r"\(\d{4}\)", s)
+            or re.search(r"\d", s)
+        ):
+            facts.append(s.strip())
+        if len(facts) >= max_facts:
+            break
+    return facts
+
 def _safe_meta_value(value):
     if value is None:
         return None
@@ -181,6 +207,10 @@ def build_llm_payload(
         text = _normalize_text(text)
         if len(text) > per_snippet_budget:
             text = extract_key_sentences(text, per_snippet_budget)
+        facts = extract_facts(text, max_facts=10)
+        if not facts:
+            # Fallback to a short excerpt to avoid empty payloads
+            facts = [text[: min(400, len(text))]] if text else []
 
         # Whitelist metadata fields to avoid leaking large/unsafe blobs
         meta = {
@@ -197,7 +227,7 @@ def build_llm_payload(
                 "url": s.url,
                 "source_type": s.source_type,
                 "metadata": meta,
-                "excerpt": text,
+                "facts": facts,
             }
         )
     return payload
