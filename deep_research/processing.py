@@ -22,6 +22,20 @@ HYPE_PATTERNS = {
     "sign up today", "subscribe now", "book now", "limited offer"
 }
 
+# Heuristics for prompt-injection style instructions in untrusted sources
+INJECTION_PATTERNS = (
+    "ignore previous instructions",
+    "disregard previous instructions",
+    "system prompt",
+    "developer message",
+    "you are chatgpt",
+    "act as",
+    "do not follow",
+    "follow these instructions",
+    "tool output",
+    "assistant:",
+)
+
 class Snippet:
     __slots__ = ("title", "body", "url", "ref_num", "source_type", "metadata", "abstract")
     def __init__(self, title: str, body: str, url: str, source_type: str = "web", 
@@ -65,10 +79,86 @@ def compress_text(html: str, max_tokens: int) -> str:
         else:
              return ""
     
+    text = sanitize_text(text)
+
     # Simple truncation based on estimated tokens
     if token_count(text) > max_tokens:
         return text[:max_tokens * EST_CHAR_PER_TOKEN]
     return text
+
+def sanitize_text(text: str) -> str:
+    """Remove common prompt-injection style lines from untrusted sources."""
+    if not text:
+        return ""
+    lines = text.splitlines()
+    cleaned = []
+    for line in lines:
+        low = line.strip().lower()
+        if not low:
+            continue
+        if any(pat in low for pat in INJECTION_PATTERNS):
+            continue
+        cleaned.append(line)
+    return "\n".join(cleaned).strip()
+
+def _normalize_text(text: str) -> str:
+    """Normalize untrusted text for LLM consumption."""
+    if not text:
+        return ""
+    # Remove URLs inside the text; URL is provided separately
+    text = re.sub(r"https?://\S+", "", text)
+    # Collapse excessive whitespace
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+def _safe_meta_value(value):
+    if value is None:
+        return None
+    if isinstance(value, (int, float, bool)):
+        return value
+    if isinstance(value, list):
+        return [str(v) for v in value][:20]
+    return str(value)
+
+def build_llm_payload(
+    snippets: List["Snippet"],
+    total_char_budget: int,
+    per_snippet_min: int = 400,
+    per_snippet_max: int = 2000,
+) -> List[Dict[str, object]]:
+    """Create a structured, size-capped payload for LLM consumption."""
+    if not snippets:
+        return []
+    total_char_budget = max(per_snippet_min, total_char_budget)
+    per_snippet_budget = total_char_budget // max(1, len(snippets))
+    per_snippet_budget = max(per_snippet_min, min(per_snippet_budget, per_snippet_max))
+
+    payload = []
+    for s in snippets:
+        text = sanitize_text(s.body or "")
+        text = _normalize_text(text)
+        if len(text) > per_snippet_budget:
+            text = text[:per_snippet_budget]
+
+        # Whitelist metadata fields to avoid leaking large/unsafe blobs
+        meta = {
+            "year": _safe_meta_value(s.metadata.get("year")),
+            "journal": _safe_meta_value(s.metadata.get("journal")),
+            "citations": _safe_meta_value(s.metadata.get("citations")),
+            "authors": _safe_meta_value(s.metadata.get("authors")),
+            "description": _safe_meta_value(s.metadata.get("description")),
+            "has_open_access": _safe_meta_value(s.metadata.get("has_open_access")),
+        }
+        payload.append(
+            {
+                "title": s.title,
+                "url": s.url,
+                "source_type": s.source_type,
+                "metadata": meta,
+                "excerpt": text,
+            }
+        )
+    return payload
 
 def is_quality_page(text: str, source_type: str = "web") -> bool:
     """Check if the text content is of sufficient quality."""

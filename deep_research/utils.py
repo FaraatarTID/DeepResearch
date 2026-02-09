@@ -160,10 +160,8 @@ def safe_write_text(path: Path, text: str, encoding: str = "utf-8") -> bool:
 # Initialize Gemini Client lazily
 _client = None
 
-# Concurrency and rate-limiting primitives for Gemini
-_gemini_semaphore = asyncio.Semaphore(GEMINI_MAX_CONCURRENCY)
-_gemini_throttle_lock = asyncio.Lock()
-_gemini_throttle_state = {"last_request": 0.0}
+# Concurrency and rate-limiting primitives for Gemini (per event loop)
+_gemini_runtime = {}
 
 # Circuit-breaker state
 _gemini_fail_count = 0
@@ -215,19 +213,29 @@ async def gemini_complete(prompt: str, max_tokens: int = 6000) -> str:
     if now < _gemini_circuit_open_until:
         raise ExternalServiceError("gemini", f"circuit-open until {_gemini_circuit_open_until - now:.1f}s")
 
-    # Enforce concurrency and RPS limits
+    # Enforce concurrency and RPS limits (per event loop)
     delay_s = 1.0 / max(1.0, GEMINI_RPS)
 
     for attempt in range(max_retries + 1):
         try:
-            async with _gemini_semaphore:
+            loop = asyncio.get_running_loop()
+            rt = _gemini_runtime.get(id(loop))
+            if rt is None:
+                rt = {
+                    "semaphore": asyncio.Semaphore(GEMINI_MAX_CONCURRENCY),
+                    "lock": asyncio.Lock(),
+                    "state": {"last_request": 0.0},
+                }
+                _gemini_runtime[id(loop)] = rt
+
+            async with rt["semaphore"]:
                 # throttle requests by RPS
-                async with _gemini_throttle_lock:
+                async with rt["lock"]:
                     now = time.monotonic()
-                    wait_time = _gemini_throttle_state.get("last_request", 0.0) + delay_s - now
+                    wait_time = rt["state"].get("last_request", 0.0) + delay_s - now
                     if wait_time > 0:
                         await asyncio.sleep(wait_time)
-                    _gemini_throttle_state["last_request"] = time.monotonic()
+                    rt["state"]["last_request"] = time.monotonic()
 
                 client = get_client()
                 response = client.models.generate_content(

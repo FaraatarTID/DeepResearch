@@ -18,6 +18,7 @@ from .config import (
     SEMANTIC_QUERY_DELAY_S,
     SEMANTIC_MAX_DELAY_S,
     SEMANTIC_SCHOLAR_API_KEY,
+    MAX_FETCH_BYTES,
 )
 from .processing import Snippet, pdf_to_text, docx_to_text
 from .utils import logger, gemini_complete
@@ -52,7 +53,29 @@ async def _throttle_request(lock: asyncio.Lock, delay_s: float, state: Dict[str,
             await asyncio.sleep(wait_time)
         state["last_request"] = time.monotonic()
 
-async def fetch_text(session: aiohttp.ClientSession, url: str, max_retries: int = 2) -> str:
+async def _read_limited(resp: aiohttp.ClientResponse, max_bytes: int) -> bytes:
+    """Read response body up to max_bytes. Truncate if needed."""
+    chunks = []
+    size = 0
+    async for chunk in resp.content.iter_chunked(64 * 1024):
+        if not chunk:
+            break
+        size += len(chunk)
+        if size > max_bytes:
+            # Truncate at max_bytes
+            overflow = size - max_bytes
+            if overflow < len(chunk):
+                chunks.append(chunk[:-overflow])
+            break
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+async def fetch_text(
+    session: aiohttp.ClientSession,
+    url: str,
+    max_retries: int = 2,
+    raise_on_error: bool = False,
+) -> str:
     """Fetch text content from a URL."""
     headers = {"User-Agent": USER_AGENT}
     
@@ -60,10 +83,25 @@ async def fetch_text(session: aiohttp.ClientSession, url: str, max_retries: int 
         try:
             async with session.get(url, headers=headers, timeout=15) as resp:
                 if resp.status != 200:
+                    if raise_on_error:
+                        raise ExternalServiceError("fetch", f"{url} - status {resp.status}", status=resp.status)
                     return ""
+
+                content_length = resp.headers.get("Content-Length")
+                if content_length:
+                    try:
+                        if int(content_length) > MAX_FETCH_BYTES:
+                            msg = f"{url} - content too large ({content_length} bytes)"
+                            if raise_on_error:
+                                raise ExternalServiceError("fetch", msg)
+                            return ""
+                    except ValueError:
+                        pass
                 
                 content_type = resp.headers.get("Content-Type", "").lower()
-                data = await resp.read()
+                data = await _read_limited(resp, MAX_FETCH_BYTES)
+                if not data:
+                    return ""
                 
                 if "application/pdf" in content_type or url.endswith(".pdf"):
                     return pdf_to_text(data)
@@ -75,8 +113,10 @@ async def fetch_text(session: aiohttp.ClientSession, url: str, max_retries: int 
         except Exception as e:
             logger.exception("Fetch attempt failed for %s: %s", url, e)
             if attempt == max_retries:
-                # Raise structured error so callers can decide how to handle
-                raise ExternalServiceError("fetch", f"{url} - {e}") from e
+                if raise_on_error:
+                    # Raise structured error so callers can decide how to handle
+                    raise ExternalServiceError("fetch", f"{url} - {e}") from e
+                return ""
             await asyncio.sleep(1)
             
     return ""
@@ -139,7 +179,10 @@ async def brave_search(
                             return []
                             
                     if resp.status != 200:
-                        logger.error(f"Brave API error: {resp.status}")
+                        msg = f"Brave API error: {resp.status}"
+                        if raise_on_error:
+                            raise ExternalServiceError("brave", msg, status=resp.status)
+                        logger.error(msg)
                         return []
                     
                     data = await resp.json()
@@ -164,6 +207,8 @@ async def brave_search(
                 return ""
             async with fetch_semaphore:
                 try:
+                    if raise_on_error:
+                        return await fetch_text(session, u, raise_on_error=True)
                     return await fetch_text(session, u)
                 except ExternalServiceError as exc:
                     logger.warning("Fetch failed for %s: %s", u, exc)
@@ -311,7 +356,10 @@ async def semantic_search(
                             return []
 
                     if resp.status != 200:
-                        logger.error(f"Semantic Scholar error: {resp.status}")
+                        msg = f"Semantic Scholar error: {resp.status}"
+                        if raise_on_error:
+                            raise ExternalServiceError("semantic_scholar", msg, status=resp.status)
+                        logger.error(msg)
                         return []
                     data = await resp.json()
                     break # Success
@@ -367,7 +415,10 @@ async def semantic_search(
             elif url:
                 # Try to fetch full text
                 try:
-                    fetched = await fetch_text(session, url)
+                    if raise_on_error:
+                        fetched = await fetch_text(session, url, raise_on_error=True)
+                    else:
+                        fetched = await fetch_text(session, url)
                     if fetched and len(fetched) > len(abstract or ""):
                         body = fetched
                 except ExternalServiceError as exc:

@@ -45,6 +45,7 @@ BRAVE_CONCURRENCY = int(os.getenv("BRAVE_CONCURRENCY", 2))
 JOURNAL_H_INDEX_THRESHOLD = int(os.getenv("JOURNAL_H_INDEX_THRESHOLD", 20))
 MIN_CITATION_COUNT = int(os.getenv("MIN_CITATION_COUNT", 3))  # Minimum citations for academic papers
 USER_AGENT = os.getenv("USER_AGENT", "Mozilla/5.0 (compatible; DeepResearchBot/1.0)")
+MAX_FETCH_BYTES = int(os.getenv("MAX_FETCH_BYTES", 2_000_000))  # 2MB cap per fetched document
 BRAVE_MAX_RETRIES = int(os.getenv("BRAVE_MAX_RETRIES", 3))
 BRAVE_QUERY_DELAY_S = float(os.getenv("BRAVE_QUERY_DELAY_S", 0.2))
 BRAVE_MAX_DELAY_S = float(os.getenv("BRAVE_MAX_DELAY_S", 4.0))

@@ -30,7 +30,15 @@ An AI-powered research assistant that performs comprehensive research on any top
 
 3. **Set up your API keys**
 
-   Copy the example secrets file:
+   Preferred: copy the example environment file and set your keys locally:
+
+   ```bash
+   cp .env.example .env
+   ```
+
+   Then edit `.env` with your keys.
+
+   Streamlit Cloud: copy the example secrets file:
 
    ```bash
    cp .streamlit/secrets.toml.example .streamlit/secrets.toml
@@ -48,6 +56,8 @@ An AI-powered research assistant that performs comprehensive research on any top
    ```bash
    streamlit run app.py
    ```
+
+> Security note: never commit real API keys. Rotate any keys that were ever committed.
 
 ### Getting API Keys
 
@@ -168,3 +178,9 @@ pre-commit install
 pre-commit run --all-files
 python scripts/pre_mortem_checks.py
 ```
+
+## Security & Secrets
+
+- Never commit real API keys. Use `.env` locally or Streamlit Secrets in production.
+- Rotate keys immediately if they were ever committed.
+- Untrusted web content is treated as data only and sanitized before synthesis, but you should still treat outputs as untrusted and review for accuracy.
