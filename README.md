@@ -9,7 +9,7 @@ An AI-powered research assistant that performs comprehensive research on any top
 - 📊 **Smart Filtering**: Filters and deduplicates results using AI-based relevance checking
 - 📈 **Bibliometrics**: Generates citation analysis and source statistics
 - 📝 **Report Synthesis**: Creates comprehensive research reports in Markdown and DOCX formats
-- 🎨 **User-Friendly Interface**: Clean Streamlit interface with real-time progress tracking
+- 🎨 **User-Friendly Interface**: Streamlit interface with real-time progress tracking
 
 ## Quick Start
 
@@ -52,7 +52,7 @@ An AI-powered research assistant that performs comprehensive research on any top
    UNPAYWALL_EMAIL = "your-email@example.com"
    ```
 
-4. **Run the app**
+4. **Run the app (Streamlit only)**
    ```bash
    streamlit run app.py
    ```
@@ -109,6 +109,7 @@ export SEMANTIC_MAX_DELAY_S=8.0
 export SEMANTIC_SCHOLAR_API_KEY=your_api_key_here
 ```
 
+
 ### Disk cache (optional)
 
 The fetcher stores a lightweight on-disk cache of fetched URLs to improve resilience.
@@ -121,17 +122,7 @@ export CACHE_MAX_BYTES=200000000
 
 #### Cache maintenance
 
-Purge cache:
-
-```bash
-python -m deep_research.main --purge-cache
-```
-
-Cleanup cache (TTL/size enforcement):
-
-```bash
-python -m deep_research.main --cleanup-cache
-```
+The cache is cleaned automatically on Streamlit startup (TTL/size enforcement).
 
 ## Project Structure
 

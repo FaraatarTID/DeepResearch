@@ -29,8 +29,10 @@ class StreamlitHandler(logging.Handler):
         msg = self.format(record)
         self.container.code(msg, language=None)
 
-# Run cache cleanup on startup to enforce TTL/size caps
-cleanup_fetch_cache()
+# Run cache cleanup once per Streamlit session to enforce TTL/size caps
+if "cache_cleaned" not in st.session_state:
+    cleanup_fetch_cache()
+    st.session_state.cache_cleaned = True
 
 # Page Config
 

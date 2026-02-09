@@ -29,6 +29,7 @@ from collections import OrderedDict
 import hashlib
 import json
 from pathlib import Path
+import math
 from .config import GEMINI_ENABLE_RELEVANCE_CACHE
 
 # Simple in-memory cache for relevance checks (disabled by default)

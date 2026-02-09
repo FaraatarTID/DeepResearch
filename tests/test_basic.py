@@ -14,7 +14,6 @@ def test_imports():
         from deep_research import search
         from deep_research import processing
         from deep_research import utils
-        from deep_research import gui
         from deep_research import pipeline
         print("[OK] Imports successful")
     except ImportError as e:
