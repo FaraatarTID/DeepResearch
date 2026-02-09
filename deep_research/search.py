@@ -19,17 +19,133 @@ from .config import (
     SEMANTIC_MAX_DELAY_S,
     SEMANTIC_SCHOLAR_API_KEY,
     MAX_FETCH_BYTES,
+    CACHE_ENABLE,
+    CACHE_TTL_S,
+    CACHE_MAX_BYTES,
 )
 from .processing import Snippet, pdf_to_text, docx_to_text
 from .utils import logger, gemini_complete
 from collections import OrderedDict
 import hashlib
+import json
+from pathlib import Path
 from .config import GEMINI_ENABLE_RELEVANCE_CACHE
 
 # Simple in-memory cache for relevance checks (disabled by default)
 _relevance_cache: "OrderedDict[str, tuple[float, bool]]" = OrderedDict()
 _RELEVANCE_CACHE_MAX = 1024
 _RELEVANCE_CACHE_TTL = 60 * 60  # 1 hour
+
+_CACHE_DIR = Path(".cache") / "fetch"
+_CACHE_CLEAN_INTERVAL_S = 5 * 60
+_last_cache_clean = 0.0
+
+def _cache_paths(url: str) -> tuple[Path, Path]:
+    digest = hashlib.sha256(url.encode("utf-8")).hexdigest()
+    data_path = _CACHE_DIR / f"{digest}.bin"
+    meta_path = _CACHE_DIR / f"{digest}.json"
+    return data_path, meta_path
+
+def _read_cache(url: str) -> tuple[bytes, str] | None:
+    if not CACHE_ENABLE:
+        return None
+    data_path, meta_path = _cache_paths(url)
+    try:
+        if not data_path.exists() or not meta_path.exists():
+            return None
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        ts = float(meta.get("ts", 0))
+        if time.time() - ts > CACHE_TTL_S:
+            return None
+        data = data_path.read_bytes()
+        content_type = meta.get("content_type", "")
+        return data, content_type
+    except Exception as e:
+        logger.warning("Cache read failed for %s: %s", url, e)
+        return None
+
+def _write_cache(url: str, data: bytes, content_type: str) -> None:
+    if not CACHE_ENABLE:
+        return
+    data_path, meta_path = _cache_paths(url)
+    try:
+        data_path.parent.mkdir(parents=True, exist_ok=True)
+        data_path.write_bytes(data)
+        meta = {"ts": time.time(), "content_type": content_type, "url": url}
+        meta_path.write_text(json.dumps(meta), encoding="utf-8")
+        _maybe_cleanup_cache()
+    except Exception as e:
+        logger.warning("Cache write failed for %s: %s", url, e)
+
+def _maybe_cleanup_cache() -> None:
+    global _last_cache_clean
+    now = time.time()
+    if now - _last_cache_clean < _CACHE_CLEAN_INTERVAL_S:
+        return
+    _last_cache_clean = now
+    _cleanup_cache()
+
+def _cleanup_cache() -> None:
+    if not _CACHE_DIR.exists():
+        return
+    try:
+        items = []
+        total_bytes = 0
+        for meta_path in _CACHE_DIR.glob("*.json"):
+            data_path = meta_path.with_suffix(".bin")
+            try:
+                meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                ts = float(meta.get("ts", 0))
+            except Exception:
+                ts = 0
+            size = data_path.stat().st_size if data_path.exists() else 0
+            items.append((ts, size, meta_path, data_path))
+            total_bytes += size
+
+        # Remove expired entries first
+        for ts, size, meta_path, data_path in list(items):
+            if time.time() - ts > CACHE_TTL_S:
+                for p in (data_path, meta_path):
+                    try:
+                        if p.exists():
+                            p.unlink()
+                    except Exception:
+                        pass
+                total_bytes -= size
+                items.remove((ts, size, meta_path, data_path))
+
+        # Enforce size limit (oldest first)
+        if total_bytes > CACHE_MAX_BYTES:
+            items.sort(key=lambda x: x[0])
+            for ts, size, meta_path, data_path in items:
+                if total_bytes <= CACHE_MAX_BYTES:
+                    break
+                for p in (data_path, meta_path):
+                    try:
+                        if p.exists():
+                            p.unlink()
+                    except Exception:
+                        pass
+                total_bytes -= size
+    except Exception as e:
+        logger.warning("Cache cleanup failed: %s", e)
+
+def cleanup_fetch_cache() -> None:
+    """Public cache cleanup entrypoint."""
+    _cleanup_cache()
+
+def purge_fetch_cache() -> None:
+    """Remove all cached fetch entries."""
+    if not _CACHE_DIR.exists():
+        return
+    try:
+        for p in _CACHE_DIR.glob("*"):
+            try:
+                p.unlink()
+            except Exception:
+                pass
+    except Exception as e:
+        logger.warning("Cache purge failed: %s", e)
 
 def _retry_after_seconds(headers: aiohttp.typedefs.LooseHeaders) -> Optional[float]:
     if not headers:
@@ -78,7 +194,16 @@ async def fetch_text(
 ) -> str:
     """Fetch text content from a URL."""
     headers = {"User-Agent": USER_AGENT}
-    
+
+    cached = _read_cache(url)
+    if cached:
+        data, content_type = cached
+        if "application/pdf" in content_type or url.endswith(".pdf"):
+            return pdf_to_text(data)
+        if "application/vnd.openxmlformats-officedocument.wordprocessingml.document" in content_type:
+            return docx_to_text(data)
+        return data.decode("utf-8", errors="ignore")
+
     for attempt in range(max_retries + 1):
         try:
             async with session.get(url, headers=headers, timeout=15) as resp:
@@ -102,6 +227,8 @@ async def fetch_text(
                 data = await _read_limited(resp, MAX_FETCH_BYTES)
                 if not data:
                     return ""
+
+                _write_cache(url, data, content_type)
                 
                 if "application/pdf" in content_type or url.endswith(".pdf"):
                     return pdf_to_text(data)

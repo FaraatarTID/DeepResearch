@@ -9,6 +9,7 @@ import os
 from .config import OUTPUT_FILE
 from .pipeline import run_research
 from .utils import build_doc, safe_save, safe_write_text, logger
+from .search import cleanup_fetch_cache
 
 import queue
 import logging
@@ -231,6 +232,8 @@ class ResearchGUI:
             logging.getLogger().removeHandler(self.log_handler)
 
 def main():
+    # Run cache cleanup on startup to enforce TTL/size caps
+    cleanup_fetch_cache()
     root = tk.Tk()
     app = ResearchGUI(root)
     root.mainloop()

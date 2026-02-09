@@ -6,6 +6,7 @@ from pathlib import Path
 from deep_research.pipeline import run_research
 from deep_research.utils import build_doc, logger
 from deep_research.config import GEMINI_KEY, BRAVE_API_KEY
+from deep_research.search import cleanup_fetch_cache
 import logging
 
 # Setup logging to Streamlit
@@ -27,6 +28,9 @@ class StreamlitHandler(logging.Handler):
             return
         msg = self.format(record)
         self.container.code(msg, language=None)
+
+# Run cache cleanup on startup to enforce TTL/size caps
+cleanup_fetch_cache()
 
 # Page Config
 

@@ -111,6 +111,48 @@ def _normalize_text(text: str) -> str:
     text = re.sub(r"\s+", " ", text).strip()
     return text
 
+def _sentence_candidates(text: str) -> List[str]:
+    if not text:
+        return []
+    # Basic sentence split; avoid heavy NLP deps
+    parts = re.split(r"(?<=[.!?])\s+", text)
+    return [p.strip() for p in parts if p.strip()]
+
+def extract_key_sentences(text: str, max_chars: int) -> str:
+    """Heuristically keep more factual sentences and drop instruction-like text."""
+    if not text:
+        return ""
+    sentences = _sentence_candidates(text)
+    if not sentences:
+        return text[:max_chars]
+
+    def score(s: str) -> int:
+        s_low = s.lower()
+        points = 0
+        if any(tok in s_low for tok in ("et al", "study", "research", "evidence", "analysis", "dataset")):
+            points += 2
+        if re.search(r"\b(19|20)\d{2}\b", s):
+            points += 2
+        if re.search(r"\[\d+\]", s) or re.search(r"\(\d{4}\)", s):
+            points += 2
+        if re.search(r"\d", s):
+            points += 1
+        return points
+
+    ranked = sorted(sentences, key=score, reverse=True)
+    picked = []
+    total = 0
+    for s in ranked:
+        if total + len(s) + 1 > max_chars:
+            continue
+        picked.append(s)
+        total += len(s) + 1
+        if total >= max_chars:
+            break
+    if not picked:
+        return text[:max_chars]
+    return " ".join(picked)
+
 def _safe_meta_value(value):
     if value is None:
         return None
@@ -138,7 +180,7 @@ def build_llm_payload(
         text = sanitize_text(s.body or "")
         text = _normalize_text(text)
         if len(text) > per_snippet_budget:
-            text = text[:per_snippet_budget]
+            text = extract_key_sentences(text, per_snippet_budget)
 
         # Whitelist metadata fields to avoid leaking large/unsafe blobs
         meta = {
@@ -204,6 +246,16 @@ def semantic_dedup(texts: List[str], max_keep: int = 100) -> List[int]:
     
     if len(texts) <= 1:
         return [0]
+
+    # Cap inputs to reduce O(n^2) cost on large runs
+    if len(texts) > max_keep * 3:
+        # Keep the longest texts as a heuristic for information density
+        ranked = sorted(range(len(texts)), key=lambda i: len(texts[i]), reverse=True)
+        keep_seed = ranked[: max_keep * 3]
+        texts = [texts[i] for i in keep_seed]
+        index_map = {new_i: old_i for new_i, old_i in enumerate(keep_seed)}
+    else:
+        index_map = {i: i for i in range(len(texts))}
         
     # TF-IDF Vectorization
     vectorizer = TfidfVectorizer(stop_words='english', max_features=5000)
@@ -240,4 +292,4 @@ def semantic_dedup(texts: List[str], max_keep: int = 100) -> List[int]:
             if j not in seen_indices and sim_matrix[i, j] > 0.85: # Threshold
                 seen_indices.add(j)
                 
-    return keep_indices
+    return [index_map[i] for i in keep_indices]

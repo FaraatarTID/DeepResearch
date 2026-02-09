@@ -109,6 +109,30 @@ export SEMANTIC_MAX_DELAY_S=8.0
 export SEMANTIC_SCHOLAR_API_KEY=your_api_key_here
 ```
 
+### Disk cache (optional)
+
+The fetcher stores a lightweight on-disk cache of fetched URLs to improve resilience.
+
+```bash
+export CACHE_ENABLE=true
+export CACHE_TTL_S=86400
+export CACHE_MAX_BYTES=200000000
+```
+
+#### Cache maintenance
+
+Purge cache:
+
+```bash
+python -m deep_research.main --purge-cache
+```
+
+Cleanup cache (TTL/size enforcement):
+
+```bash
+python -m deep_research.main --cleanup-cache
+```
+
 ## Project Structure
 
 ```
@@ -184,3 +208,9 @@ python scripts/pre_mortem_checks.py
 - Never commit real API keys. Use `.env` locally or Streamlit Secrets in production.
 - Rotate keys immediately if they were ever committed.
 - Untrusted web content is treated as data only and sanitized before synthesis, but you should still treat outputs as untrusted and review for accuracy.
+
+## Content Security Pipeline
+
+Untrusted content is filtered and normalized before it reaches the LLM. The pipeline:
+1) strips common instruction-like lines, 2) normalizes whitespace and URLs, and
+3) extracts higher-signal sentences (years, citations, numeric facts) within a strict size budget.
